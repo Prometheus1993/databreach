@@ -1,0 +1,38 @@
+# Secrets & local config — never commit
+.env
+.env.*
+*.pem
+*.key
+id_rsa*
+secrets/
+credentials*
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.venv/
+venv/
+.Python
+
+# Game save files (contain local player progress)
+.databreach_save.json
+*.save
+
+# Docker local state
+.docker/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/

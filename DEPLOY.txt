@@ -1,0 +1,52 @@
+DATA BREACH - VPS DEPLOYMENT INSTRUCTIONS
+==========================================
+
+REQUIREMENTS
+------------
+- Ubuntu 25.10 VPS
+- Port 3078 open on the firewall
+- SSH access
+
+STEP 1 — Install Docker (run once)
+-----------------------------------
+curl -fsSL https://get.docker.com | sh
+
+STEP 2 — Open port 3078
+------------------------
+ufw allow 3078
+
+STEP 3 — Upload this folder to the VPS
+----------------------------------------
+Run this on YOUR machine (not the VPS), replacing USER and VPS_IP:
+
+    scp -r databreach_server user@VPS_IP:/home/user/
+
+STEP 4 — SSH into the VPS and start the game
+---------------------------------------------
+ssh user@VPS_IP
+cd databreach_server
+docker compose up -d
+
+That's it. The game will be live at:
+
+    http://VPS_IP:3078
+
+If you have a domain pointed to the VPS IP, it also works at:
+
+    http://yourdomain.com:3078
+
+USEFUL COMMANDS
+---------------
+View logs:          docker compose logs -f
+Stop the game:      docker compose down
+Restart the game:   docker compose restart
+Rebuild after edit: docker compose up -d --build
+
+NOTES
+-----
+- First startup takes ~2 minutes (Docker builds the image)
+- The game takes ~5 seconds to appear after the container starts
+- Only one player can play at a time. A second visitor will see
+  "GAME IN USE" and will be retried automatically every 5 seconds.
+- Controls: Arrow keys, Enter, Space, Escape. Click the canvas first
+  to make sure keyboard input is captured.
