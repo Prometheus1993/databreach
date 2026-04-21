@@ -16,6 +16,7 @@ import json
 import random
 import math
 import time
+import asyncio
 
 # --- DEBUG MODE (F1=skip minigame, F2=add 60s, F3=jump to intel) ---------
 DEBUG = "--debug" in sys.argv
@@ -279,7 +280,7 @@ RANK_ORDER = ["CATASTROPHIC FAILURE", "POOR", "ADEQUATE", "EXCELLENT", "LEGENDAR
 
 # --- DISRUPTION EVENTS -------------------------------------------------------
 DISRUPTION_EVENTS = [
-    {"name": "INTRUSION DETECTED",  "duration": 2.0, "effect": "invert_controls",
+    {"name": "INTRUSION DETECTED",  "duration": 5.0, "effect": "invert_controls",
      "color": RED, "msg": ">> CONTROLS INVERTED <<"},
     {"name": "SIGNAL INTERFERENCE", "duration": 3.0, "effect": "static_overlay",
      "color": YELLOW, "msg": ">> VISUAL NOISE <<"},
@@ -614,6 +615,19 @@ def segments_intersect(p1, p2, p3, p4):
 
 # --- GAME MANAGER ------------------------------------------------------------
 
+# Keys polled each frame to synthesize KEYDOWN events. In pygbag (pygame-web)
+# KEYDOWN events for arrow/menu keys can be swallowed by the browser before
+# reaching pygame's event queue, so we rising-edge-detect them via
+# pygame.key.get_pressed() and inject the missing events ourselves.
+_MENU_POLL_KEYS = (
+    pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT,
+    pygame.K_RETURN, pygame.K_SPACE, pygame.K_ESCAPE,
+    pygame.K_w, pygame.K_a, pygame.K_s, pygame.K_d,
+    pygame.K_q, pygame.K_1, pygame.K_2, pygame.K_3,
+    pygame.K_PAGEUP, pygame.K_PAGEDOWN,
+)
+
+
 class Game:
     def __init__(self):
         self.diff = DIFFICULTIES["AGENT"]
@@ -630,6 +644,9 @@ class Game:
         self.tw_done = False
         self.flash_timer = 0
         self.flash_color = None
+
+        # Edge-detection cache for synthetic KEYDOWN events (pygbag workaround).
+        self._prev_keys = {}
 
         # Menu
         self.menu_cursor = 0
@@ -964,11 +981,34 @@ class Game:
             # Red text warning
             draw_text_centered(screen, ">> SYSTEM COMPROMISED <<", HEIGHT // 2, FONT_LG, RED)
 
-    def run(self):
+    def _inject_synth_keys(self, events):
+        """Rising-edge-detect polled key state and append synthetic KEYDOWN
+        events for any watched key that pygame didn't already emit. Menus rely
+        on KEYDOWN; pygbag sometimes drops those while keeping polled state
+        intact, which is why in-game controls (get_pressed) work while menus
+        don't."""
+        kp = pygame.key.get_pressed()
+        real_down = {e.key for e in events if e.type == pygame.KEYDOWN}
+        cur = {}
+        mods = pygame.key.get_mods()
+        for k in _MENU_POLL_KEYS:
+            down = bool(kp[k])
+            cur[k] = down
+            if down and not self._prev_keys.get(k, False) and k not in real_down:
+                events.append(pygame.event.Event(
+                    pygame.KEYDOWN,
+                    {"key": k, "mod": mods, "unicode": "", "scancode": 0},
+                ))
+        self._prev_keys = cur
+        return events
+
+    async def run(self):
         running = True
         while running:
             dt = clock.tick(FPS) / 1000.0
+            await asyncio.sleep(0)
             events = pygame.event.get()
+            events = self._inject_synth_keys(events)
             for e in events:
                 if e.type == pygame.QUIT:
                     running = False
@@ -3035,6 +3075,8 @@ class Game:
 
 # --- MAIN --------------------------------------------------------------------
 
-if __name__ == "__main__":
+async def main():
     game = Game()
-    game.run()
+    await game.run()
+
+asyncio.run(main())
