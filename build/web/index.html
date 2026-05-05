@@ -699,8 +699,19 @@ frameborder="1"
                 setActionButtonsEnabled(true);
                 setTimeout(() => { if (webgazerOn && samples.length < 5) openCalibration(); }, 800);
             } catch (e) {
-                console.error(e);
-                alert("Could not access webcam. Allow camera permission and try again.");
+                console.error("[eye tracking] webgazer begin failed:", e);
+                const reason = (e && (e.name || e.message)) || "unknown";
+                let hint = "";
+                if (/NotAllowed|Permission/i.test(reason)) {
+                    hint = "\n\nChrome blocks the camera for this site. Click the 🔒 icon left of the URL → Site settings → Camera → Allow, then refresh.";
+                } else if (/NotFound|Devices/i.test(reason)) {
+                    hint = "\n\nNo webcam was detected. Make sure one is connected and not disabled.";
+                } else if (/NotReadable|TrackStart/i.test(reason)) {
+                    hint = "\n\nThe webcam is in use by another app (Zoom, Teams, OBS, …). Close it and try again.";
+                } else if (/Secure|https/i.test(reason)) {
+                    hint = "\n\nThe browser only allows webcam access on HTTPS or localhost.";
+                }
+                alert("Could not start eye tracking.\nReason: " + reason + hint);
                 toggleBtn.textContent = "ENABLE EYE TRACKING";
                 toggleBtn.disabled = false;
             }
