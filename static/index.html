@@ -35,7 +35,7 @@
       #frame {
         width: min(1024px, 100vw);
         height: min(768px, calc(100vw * 768 / 1024));
-        max-height: calc(100vh - 70px);
+        max-height: calc(100vh - 180px);
         border: 1px solid #003c00;
         background: #000;
         display: block;
@@ -47,39 +47,177 @@
         opacity: 0.3;
         margin-top: 8px;
       }
+
+      /* eye tracking UI */
+      #eye-toolbar {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 8px;
+        font-size: 11px;
+        letter-spacing: 2px;
+      }
+      .eye-btn {
+        background: #050505;
+        color: #00e600;
+        border: 1px solid #003c00;
+        padding: 6px 12px;
+        font-family: inherit;
+        font-size: 11px;
+        letter-spacing: 2px;
+        cursor: pointer;
+        text-transform: uppercase;
+      }
+      .eye-btn:hover { border-color: #00e600; }
+      .eye-btn.active { background: #002500; border-color: #00e600; }
+      .eye-btn[disabled] { opacity: 0.3; cursor: not-allowed; }
+
+      #dwell-row {
+        display: flex;
+        gap: 12px;
+        margin-top: 10px;
+        width: min(1024px, 100vw);
+        justify-content: center;
+      }
+      .dwell-btn {
+        flex: 1;
+        max-width: 240px;
+        padding: 14px;
+        border: 1px solid #003c00;
+        background: #000;
+        color: #00e600;
+        text-align: center;
+        font-size: 14px;
+        letter-spacing: 4px;
+        position: relative;
+        overflow: hidden;
+      }
+      .dwell-btn .fill {
+        position: absolute;
+        left: 0; bottom: 0; top: 0;
+        width: 0%;
+        background: rgba(0, 230, 0, 0.18);
+        transition: width 60ms linear;
+      }
+      .dwell-btn.armed { border-color: #00e600; }
+
+      #gaze-dot {
+        position: fixed;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: rgba(0, 230, 0, 0.85);
+        box-shadow: 0 0 12px #00e600;
+        pointer-events: none;
+        z-index: 9999;
+        transform: translate(-50%, -50%);
+        display: none;
+      }
+
+      /* calibration overlay */
+      #calib {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.92);
+        z-index: 10000;
+        display: none;
+      }
+      #calib.show { display: block; }
+      .calib-pt {
+        position: absolute;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: #00e600;
+        transform: translate(-50%, -50%);
+        cursor: pointer;
+        box-shadow: 0 0 16px #00e600;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        color: #000;
+        font-weight: bold;
+      }
+      .calib-pt.done { background: #003c00; box-shadow: none; color: #00e600; }
+      #calib-info {
+        position: absolute;
+        top: 30px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: #00e600;
+        font-size: 13px;
+        letter-spacing: 3px;
+        text-align: center;
+      }
+      #calib-info small { display: block; opacity: 0.5; margin-top: 6px; font-size: 10px; }
+      #calib-cancel {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+      }
+
+      /* webgazer's own video preview — keep small, top-right */
+      #webgazerVideoContainer {
+        top: auto !important;
+        bottom: 10px !important;
+        left: 10px !important;
+        right: auto !important;
+        opacity: 0.4;
+      }
     </style>
   </head>
   <body>
     <div id="status">[ CLICK GAME TO CAPTURE KEYS · 10 MIN SESSION LIMIT ]</div>
+
+    <div id="eye-toolbar">
+      <button class="eye-btn" id="eye-toggle">ENABLE EYE TRACKING</button>
+      <button class="eye-btn" id="eye-calibrate" disabled>CALIBRATE</button>
+      <button class="eye-btn" id="eye-debug" disabled>HIDE GAZE DOT</button>
+    </div>
+
     <iframe
       id="frame"
       src="/novnc/vnc_lite.html?autoconnect=1&amp;path=ws&amp;resize=scale&amp;reconnect=1&amp;reconnect_delay=3000"
       allow="fullscreen"
       scrolling="no"
     ></iframe>
+
+    <div id="dwell-row">
+      <div class="dwell-btn" data-key="Escape">
+        [ BACK ]
+        <div class="fill"></div>
+      </div>
+      <div class="dwell-btn" data-key=" ">
+        [ SELECT ]
+        <div class="fill"></div>
+      </div>
+    </div>
+
     <div id="hint">ARROW KEYS · ENTER · SPACE · ESC</div>
+
+    <div id="gaze-dot"></div>
+
+    <div id="calib">
+      <div id="calib-info">
+        CALIBRATION
+        <small>CLICK EACH GREEN DOT 5× WHILE LOOKING AT IT</small>
+      </div>
+      <button class="eye-btn" id="calib-cancel">CANCEL</button>
+    </div>
+
     <script>
+      // ============================================================
+      // existing iframe focus + key-capture logic
+      // ============================================================
       const frame = document.getElementById("frame");
       const NAV_KEYS = [
-        "ArrowUp",
-        "ArrowDown",
-        "ArrowLeft",
-        "ArrowRight",
-        " ",
-        "Spacebar",
-        "PageUp",
-        "PageDown",
-        "Home",
-        "End",
+        "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+        " ", "Spacebar", "PageUp", "PageDown", "Home", "End",
       ];
 
-      window.addEventListener(
-        "keydown",
-        (e) => {
-          if (NAV_KEYS.includes(e.key)) e.preventDefault();
-        },
-        { passive: false },
-      );
+      window.addEventListener("keydown", (e) => {
+        if (NAV_KEYS.includes(e.key)) e.preventDefault();
+      }, { passive: false });
 
       function focusCanvas() {
         try {
@@ -99,20 +237,15 @@
         try {
           const doc = frame.contentDocument || frame.contentWindow.document;
           if (!doc) return;
-          doc.addEventListener(
-            "keydown",
-            (e) => {
-              if (NAV_KEYS.includes(e.key)) e.preventDefault();
-            },
-            { capture: true, passive: false },
-          );
+          doc.addEventListener("keydown", (e) => {
+            if (NAV_KEYS.includes(e.key)) e.preventDefault();
+          }, { capture: true, passive: false });
         } catch (_) {}
         focusCanvas();
       }
 
       frame.addEventListener("load", () => {
         hookIframe();
-        // noVNC can swap in its canvas slightly after load; retry briefly.
         let tries = 0;
         const retry = setInterval(() => {
           focusCanvas();
@@ -124,6 +257,316 @@
       document.addEventListener("click", grab);
       document.addEventListener("mousedown", grab);
       window.addEventListener("focus", grab);
+
+      // ============================================================
+      // eye tracking — webgazer-driven
+      // ============================================================
+      const KEY_MAP = {
+        "ArrowUp":    { code: "ArrowUp",    keyCode: 38 },
+        "ArrowDown":  { code: "ArrowDown",  keyCode: 40 },
+        "ArrowLeft":  { code: "ArrowLeft",  keyCode: 37 },
+        "ArrowRight": { code: "ArrowRight", keyCode: 39 },
+        " ":          { code: "Space",      keyCode: 32 },
+        "Enter":      { code: "Enter",      keyCode: 13 },
+        "Escape":     { code: "Escape",     keyCode: 27 },
+      };
+
+      function dispatchKey(key, down) {
+        const meta = KEY_MAP[key];
+        if (!meta) return;
+        let target = null;
+        try {
+          const doc = frame.contentDocument || frame.contentWindow.document;
+          target = doc && (doc.querySelector("canvas") || doc.body);
+        } catch (_) {}
+        if (!target) return;
+        const ev = new KeyboardEvent(down ? "keydown" : "keyup", {
+          key, code: meta.code, keyCode: meta.keyCode, which: meta.keyCode,
+          bubbles: true, cancelable: true, view: frame.contentWindow,
+        });
+        target.dispatchEvent(ev);
+      }
+
+      // press/release tracking so we don't spam keydowns
+      const heldKeys = new Set();
+      function pressKey(key) {
+        if (heldKeys.has(key)) return;
+        heldKeys.add(key);
+        dispatchKey(key, true);
+      }
+      function releaseKey(key) {
+        if (!heldKeys.has(key)) return;
+        heldKeys.delete(key);
+        dispatchKey(key, false);
+      }
+      function releaseAll() {
+        for (const k of [...heldKeys]) releaseKey(k);
+      }
+
+      // tap = press + release after a short delay (for dwell-triggered Space/Esc)
+      function tapKey(key) {
+        dispatchKey(key, true);
+        setTimeout(() => dispatchKey(key, false), 80);
+      }
+
+      // ----- gaze smoothing (rolling average) -----
+      const GAZE_WINDOW = 8;
+      const gazeBuf = [];
+      function smoothGaze(x, y) {
+        gazeBuf.push([x, y]);
+        if (gazeBuf.length > GAZE_WINDOW) gazeBuf.shift();
+        let sx = 0, sy = 0;
+        for (const [a, b] of gazeBuf) { sx += a; sy += b; }
+        return [sx / gazeBuf.length, sy / gazeBuf.length];
+      }
+
+      // ----- zone detection inside game frame -----
+      // dead zone in the center (40% width × 40% height) → no arrow press
+      // outside dead zone but inside frame → press arrow toward edge of frame
+      function zoneForGaze(gx, gy) {
+        const rect = frame.getBoundingClientRect();
+        if (gx < rect.left || gx > rect.right || gy < rect.top || gy > rect.bottom) {
+          return null; // outside game area entirely
+        }
+        const nx = (gx - rect.left) / rect.width;  // 0..1
+        const ny = (gy - rect.top) / rect.height;  // 0..1
+        const DZ = 0.20; // half-width of dead zone (so 40% total)
+        const dx = nx - 0.5;
+        const dy = ny - 0.5;
+        if (Math.abs(dx) < DZ && Math.abs(dy) < DZ) return "center";
+        // pick the dominant axis
+        if (Math.abs(dx) > Math.abs(dy)) {
+          return dx < 0 ? "ArrowLeft" : "ArrowRight";
+        } else {
+          return dy < 0 ? "ArrowUp" : "ArrowDown";
+        }
+      }
+
+      // ----- dwell buttons (BACK / SELECT) -----
+      const DWELL_MS = 900;
+      const dwellBtns = [...document.querySelectorAll(".dwell-btn")];
+      const dwellState = new Map(dwellBtns.map((b) => [b, { entered: 0, fired: false }]));
+
+      function updateDwell(gx, gy, now) {
+        for (const btn of dwellBtns) {
+          const r = btn.getBoundingClientRect();
+          const inside = gx >= r.left && gx <= r.right && gy >= r.top && gy <= r.bottom;
+          const st = dwellState.get(btn);
+          if (inside) {
+            if (st.entered === 0) { st.entered = now; st.fired = false; }
+            const elapsed = now - st.entered;
+            const pct = Math.min(100, (elapsed / DWELL_MS) * 100);
+            btn.querySelector(".fill").style.width = pct + "%";
+            btn.classList.add("armed");
+            if (!st.fired && elapsed >= DWELL_MS) {
+              st.fired = true;
+              tapKey(btn.dataset.key);
+              btn.querySelector(".fill").style.width = "100%";
+              setTimeout(() => {
+                btn.querySelector(".fill").style.width = "0%";
+                st.entered = 0;
+              }, 200);
+            }
+          } else {
+            st.entered = 0;
+            st.fired = false;
+            btn.querySelector(".fill").style.width = "0%";
+            btn.classList.remove("armed");
+          }
+        }
+      }
+
+      // ----- gaze loop -----
+      const gazeDot = document.getElementById("gaze-dot");
+      const ZONE_HOLD_MS = 120; // zone must be stable this long before pressing
+      let currentArrow = null;
+      let candidateArrow = null;
+      let candidateSince = 0;
+      let lastGazeAt = 0;
+      let gazeDotVisible = true;
+
+      function onGaze(data) {
+        if (!data) {
+          // if we lose the eyes for >250ms, release any held arrow
+          if (performance.now() - lastGazeAt > 250) {
+            releaseAll();
+            currentArrow = candidateArrow = null;
+          }
+          return;
+        }
+        lastGazeAt = performance.now();
+        const [x, y] = smoothGaze(data.x, data.y);
+
+        if (gazeDotVisible) {
+          gazeDot.style.display = "block";
+          gazeDot.style.left = x + "px";
+          gazeDot.style.top = y + "px";
+        }
+
+        // dwell buttons (only when not calibrating)
+        if (!calibActive) updateDwell(x, y, lastGazeAt);
+
+        // arrow zones inside the game
+        const zone = zoneForGaze(x, y);
+        const next = (zone && zone !== "center" && KEY_MAP[zone]) ? zone : null;
+
+        // debounce: zone must be stable for ZONE_HOLD_MS before we commit
+        if (next !== candidateArrow) {
+          candidateArrow = next;
+          candidateSince = lastGazeAt;
+        }
+        const stable = lastGazeAt - candidateSince >= ZONE_HOLD_MS;
+        const target = stable ? candidateArrow : currentArrow;
+
+        if (target !== currentArrow) {
+          if (currentArrow) releaseKey(currentArrow);
+          if (target) pressKey(target);
+          currentArrow = target;
+        }
+      }
+
+      // ============================================================
+      // calibration overlay (9-point click)
+      // ============================================================
+      const calibEl = document.getElementById("calib");
+      const calibCancelBtn = document.getElementById("calib-cancel");
+      let calibActive = false;
+
+      function openCalibration() {
+        calibActive = true;
+        releaseAll();
+        gazeDot.style.display = "none";
+        // clear any prior dots
+        calibEl.querySelectorAll(".calib-pt").forEach((n) => n.remove());
+
+        const positions = [];
+        for (const py of [0.1, 0.5, 0.9]) {
+          for (const px of [0.1, 0.5, 0.9]) {
+            positions.push([px, py]);
+          }
+        }
+        const CLICKS_PER_POINT = 5;
+        let remaining = positions.length;
+
+        positions.forEach(([px, py], idx) => {
+          const dot = document.createElement("div");
+          dot.className = "calib-pt";
+          dot.style.left = (px * 100) + "%";
+          dot.style.top = (py * 100) + "%";
+          let clicks = 0;
+          dot.textContent = CLICKS_PER_POINT;
+          dot.addEventListener("click", () => {
+            clicks++;
+            dot.textContent = Math.max(0, CLICKS_PER_POINT - clicks);
+            if (clicks >= CLICKS_PER_POINT) {
+              dot.classList.add("done");
+              dot.textContent = "✓";
+              dot.style.pointerEvents = "none";
+              remaining--;
+              if (remaining === 0) closeCalibration();
+            }
+          });
+          calibEl.appendChild(dot);
+        });
+
+        calibEl.classList.add("show");
+      }
+
+      function closeCalibration() {
+        calibEl.classList.remove("show");
+        calibActive = false;
+        if (gazeDotVisible) gazeDot.style.display = "block";
+      }
+      calibCancelBtn.addEventListener("click", closeCalibration);
+
+      // ============================================================
+      // toolbar
+      // ============================================================
+      const toggleBtn = document.getElementById("eye-toggle");
+      const calibBtn = document.getElementById("eye-calibrate");
+      const debugBtn = document.getElementById("eye-debug");
+
+      let webgazerReady = false;
+      let webgazerOn = false;
+
+      async function startWebgazer() {
+        if (typeof webgazer === "undefined") {
+          alert("WebGazer failed to load — check your internet connection.");
+          return;
+        }
+        toggleBtn.textContent = "STARTING…";
+        toggleBtn.disabled = true;
+        try {
+          webgazer.params.showVideoPreview = true;
+          webgazer.params.showFaceOverlay = false;
+          webgazer.params.showFaceFeedbackBox = false;
+          webgazer.showPredictionPoints(false);
+          await webgazer
+            .setRegression("ridge")
+            .setGazeListener((data) => onGaze(data))
+            .begin();
+          webgazerReady = true;
+          webgazerOn = true;
+          toggleBtn.textContent = "DISABLE EYE TRACKING";
+          toggleBtn.classList.add("active");
+          toggleBtn.disabled = false;
+          calibBtn.disabled = false;
+          debugBtn.disabled = false;
+          // suggest calibration on first run
+          setTimeout(() => {
+            if (webgazerOn && gazeBuf.length < 5) openCalibration();
+          }, 800);
+        } catch (e) {
+          console.error(e);
+          alert("Could not access webcam. Allow camera permission and try again.");
+          toggleBtn.textContent = "ENABLE EYE TRACKING";
+          toggleBtn.disabled = false;
+        }
+      }
+
+      function stopWebgazer() {
+        if (!webgazerReady) return;
+        webgazerOn = false;
+        webgazer.pause();
+        webgazer.showVideoPreview(false);
+        releaseAll();
+        gazeDot.style.display = "none";
+        toggleBtn.textContent = "ENABLE EYE TRACKING";
+        toggleBtn.classList.remove("active");
+        calibBtn.disabled = true;
+        debugBtn.disabled = true;
+      }
+
+      toggleBtn.addEventListener("click", () => {
+        if (!webgazerReady) startWebgazer();
+        else if (webgazerOn) stopWebgazer();
+        else { webgazer.resume(); webgazer.showVideoPreview(true); webgazerOn = true;
+               toggleBtn.textContent = "DISABLE EYE TRACKING";
+               toggleBtn.classList.add("active");
+               calibBtn.disabled = false; debugBtn.disabled = false; }
+      });
+
+      calibBtn.addEventListener("click", openCalibration);
+
+      debugBtn.addEventListener("click", () => {
+        gazeDotVisible = !gazeDotVisible;
+        debugBtn.textContent = gazeDotVisible ? "HIDE GAZE DOT" : "SHOW GAZE DOT";
+        if (!gazeDotVisible) gazeDot.style.display = "none";
+      });
+
+      // load webgazer lazily so the page renders fast
+      function loadWebgazer() {
+        return new Promise((resolve, reject) => {
+          if (typeof webgazer !== "undefined") return resolve();
+          const s = document.createElement("script");
+          s.src = "https://webgazer.cs.brown.edu/webgazer.js";
+          s.onload = () => resolve();
+          s.onerror = () => reject(new Error("webgazer load failed"));
+          document.head.appendChild(s);
+        });
+      }
+      // preload in the background so the first click is fast
+      loadWebgazer().catch((e) => console.warn("webgazer not loaded:", e));
     </script>
   </body>
 </html>
