@@ -273,6 +273,114 @@ function show_infobox() {
            right: 10px;
            border: 1px solid black;
         }
+
+        /* ---------- eye tracking overlay ---------- */
+        #eye-toolbar {
+            position: fixed;
+            top: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 8px;
+            z-index: 1000;
+            font-family: "Courier New", Courier, monospace;
+        }
+        .eye-btn {
+            background: rgba(0, 0, 0, 0.75);
+            color: #00e600;
+            border: 1px solid #00e600;
+            padding: 6px 12px;
+            font-family: inherit;
+            font-size: 11px;
+            letter-spacing: 2px;
+            cursor: pointer;
+            text-transform: uppercase;
+        }
+        .eye-btn:hover { background: rgba(0, 60, 0, 0.85); }
+        .eye-btn.active { background: rgba(0, 60, 0, 0.85); }
+        .eye-btn[disabled] { opacity: 0.35; cursor: not-allowed; }
+
+        .dwell-btn {
+            position: fixed;
+            bottom: 16px;
+            width: 200px;
+            height: 70px;
+            background: rgba(0, 0, 0, 0.75);
+            border: 1px solid #00e600;
+            color: #00e600;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 14px;
+            letter-spacing: 4px;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            overflow: hidden;
+        }
+        .dwell-btn.show { display: flex; }
+        .dwell-btn.armed { box-shadow: 0 0 20px #00e600; }
+        .dwell-btn .fill {
+            position: absolute;
+            inset: 0 auto 0 0;
+            width: 0%;
+            background: rgba(0, 230, 0, 0.20);
+            transition: width 60ms linear;
+        }
+        .dwell-btn .label { position: relative; z-index: 2; }
+        #dwell-back   { left: 16px;  }
+        #dwell-select { right: 16px; }
+
+        #gaze-dot {
+            position: fixed;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: rgba(0, 230, 0, 0.85);
+            box-shadow: 0 0 12px #00e600;
+            pointer-events: none;
+            z-index: 9998;
+            transform: translate(-50%, -50%);
+            display: none;
+        }
+
+        #calib {
+            position: fixed; inset: 0;
+            background: rgba(0, 0, 0, 0.92);
+            z-index: 10000;
+            display: none;
+            font-family: "Courier New", Courier, monospace;
+        }
+        #calib.show { display: block; }
+        .calib-pt {
+            position: absolute;
+            width: 28px; height: 28px;
+            border-radius: 50%;
+            background: #00e600;
+            transform: translate(-50%, -50%);
+            cursor: pointer;
+            box-shadow: 0 0 16px #00e600;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 11px; color: #000; font-weight: bold;
+        }
+        .calib-pt.done { background: #003c00; box-shadow: none; color: #00e600; }
+        #calib-info {
+            position: absolute; top: 30px; left: 50%;
+            transform: translateX(-50%);
+            color: #00e600; font-size: 13px; letter-spacing: 3px;
+            text-align: center;
+        }
+        #calib-info small { display: block; opacity: 0.5; margin-top: 6px; font-size: 10px; }
+        #calib-cancel { position: absolute; top: 20px; right: 20px; }
+
+        #webgazerVideoContainer {
+            top: auto !important;
+            bottom: 10px !important;
+            left: 50% !important;
+            transform: translateX(-50%) !important;
+            right: auto !important;
+            opacity: 0.4;
+            z-index: 999 !important;
+        }
     </style>
 
     <script>
@@ -370,6 +478,294 @@ frameborder="1"
     <div id="pyconsole">
         <div id="terminal" tabIndex=1 align="left"></div>
     </div>
+
+    <!-- eye tracking UI -->
+    <div id="eye-toolbar">
+        <button class="eye-btn" id="eye-toggle">ENABLE EYE TRACKING</button>
+        <button class="eye-btn" id="eye-calibrate" disabled>CALIBRATE</button>
+        <button class="eye-btn" id="eye-debug" disabled>HIDE GAZE DOT</button>
+    </div>
+
+    <div class="dwell-btn" id="dwell-back" data-key="Escape">
+        <div class="fill"></div>
+        <div class="label">[ BACK ]</div>
+    </div>
+    <div class="dwell-btn" id="dwell-select" data-key=" ">
+        <div class="fill"></div>
+        <div class="label">[ SELECT ]</div>
+    </div>
+
+    <div id="gaze-dot"></div>
+
+    <div id="calib">
+        <div id="calib-info">
+            CALIBRATION
+            <small>CLICK EACH GREEN DOT 5× WHILE LOOKING AT IT</small>
+        </div>
+        <button class="eye-btn" id="calib-cancel">CANCEL</button>
+    </div>
+
+    <script type="application/javascript">
+    (function () {
+        const KEY_MAP = {
+            "ArrowUp":    { code: "ArrowUp",    keyCode: 38 },
+            "ArrowDown":  { code: "ArrowDown",  keyCode: 40 },
+            "ArrowLeft":  { code: "ArrowLeft",  keyCode: 37 },
+            "ArrowRight": { code: "ArrowRight", keyCode: 39 },
+            " ":          { code: "Space",      keyCode: 32 },
+            "Enter":      { code: "Enter",      keyCode: 13 },
+            "Escape":     { code: "Escape",     keyCode: 27 },
+        };
+
+        // dispatch synthetic key events to pygame's canvas (SDL2 listens on document/canvas)
+        function dispatchKey(key, down) {
+            const meta = KEY_MAP[key];
+            if (!meta) return;
+            const targets = [
+                document.getElementById("canvas"),
+                document.body,
+                document,
+                window,
+            ].filter(Boolean);
+            for (const t of targets) {
+                const ev = new KeyboardEvent(down ? "keydown" : "keyup", {
+                    key, code: meta.code, keyCode: meta.keyCode, which: meta.keyCode,
+                    bubbles: true, cancelable: true,
+                });
+                t.dispatchEvent(ev);
+            }
+        }
+
+        const heldKeys = new Set();
+        function pressKey(key)   { if (heldKeys.has(key)) return; heldKeys.add(key);    dispatchKey(key, true); }
+        function releaseKey(key) { if (!heldKeys.has(key)) return; heldKeys.delete(key); dispatchKey(key, false); }
+        function releaseAll()    { for (const k of [...heldKeys]) releaseKey(k); }
+        function tapKey(key)     { dispatchKey(key, true); setTimeout(() => dispatchKey(key, false), 80); }
+
+        // gaze smoothing
+        const GAZE_WINDOW = 8;
+        const gazeBuf = [];
+        function smoothGaze(x, y) {
+            gazeBuf.push([x, y]);
+            if (gazeBuf.length > GAZE_WINDOW) gazeBuf.shift();
+            let sx = 0, sy = 0;
+            for (const [a, b] of gazeBuf) { sx += a; sy += b; }
+            return [sx / gazeBuf.length, sy / gazeBuf.length];
+        }
+
+        // arrow zones — full viewport, 40% dead zone in center
+        function zoneForGaze(gx, gy) {
+            const w = window.innerWidth, h = window.innerHeight;
+            if (gx < 0 || gx > w || gy < 0 || gy > h) return null;
+            const nx = gx / w, ny = gy / h;
+            const dx = nx - 0.5, dy = ny - 0.5;
+            const DZ = 0.20;
+            if (Math.abs(dx) < DZ && Math.abs(dy) < DZ) return "center";
+            if (Math.abs(dx) > Math.abs(dy)) return dx < 0 ? "ArrowLeft" : "ArrowRight";
+            return dy < 0 ? "ArrowUp" : "ArrowDown";
+        }
+
+        // dwell buttons
+        const DWELL_MS = 900;
+        const dwellBtns = [...document.querySelectorAll(".dwell-btn")];
+        const dwellState = new Map(dwellBtns.map((b) => [b, { entered: 0, fired: false }]));
+        function updateDwell(gx, gy, now) {
+            for (const btn of dwellBtns) {
+                const r = btn.getBoundingClientRect();
+                const inside = gx >= r.left && gx <= r.right && gy >= r.top && gy <= r.bottom;
+                const st = dwellState.get(btn);
+                const fillEl = btn.querySelector(".fill");
+                if (inside) {
+                    if (st.entered === 0) { st.entered = now; st.fired = false; }
+                    const elapsed = now - st.entered;
+                    fillEl.style.width = Math.min(100, (elapsed / DWELL_MS) * 100) + "%";
+                    btn.classList.add("armed");
+                    if (!st.fired && elapsed >= DWELL_MS) {
+                        st.fired = true;
+                        tapKey(btn.dataset.key);
+                        fillEl.style.width = "100%";
+                        setTimeout(() => { fillEl.style.width = "0%"; st.entered = 0; }, 200);
+                    }
+                } else {
+                    st.entered = 0;
+                    st.fired = false;
+                    fillEl.style.width = "0%";
+                    btn.classList.remove("armed");
+                }
+            }
+        }
+
+        // gaze loop
+        const gazeDot = document.getElementById("gaze-dot");
+        const ZONE_HOLD_MS = 120;
+        let currentArrow = null;
+        let candidateArrow = null;
+        let candidateSince = 0;
+        let lastGazeAt = 0;
+        let gazeDotVisible = true;
+
+        function onGaze(data) {
+            if (!data) {
+                if (performance.now() - lastGazeAt > 250) {
+                    releaseAll();
+                    currentArrow = candidateArrow = null;
+                }
+                return;
+            }
+            lastGazeAt = performance.now();
+            const [x, y] = smoothGaze(data.x, data.y);
+
+            if (gazeDotVisible) {
+                gazeDot.style.display = "block";
+                gazeDot.style.left = x + "px";
+                gazeDot.style.top  = y + "px";
+            }
+
+            if (!calibActive) updateDwell(x, y, lastGazeAt);
+
+            const zone = zoneForGaze(x, y);
+            const next = (zone && zone !== "center" && KEY_MAP[zone]) ? zone : null;
+            if (next !== candidateArrow) { candidateArrow = next; candidateSince = lastGazeAt; }
+            const stable = lastGazeAt - candidateSince >= ZONE_HOLD_MS;
+            const target = stable ? candidateArrow : currentArrow;
+            if (target !== currentArrow) {
+                if (currentArrow) releaseKey(currentArrow);
+                if (target) pressKey(target);
+                currentArrow = target;
+            }
+        }
+
+        // calibration
+        const calibEl = document.getElementById("calib");
+        const calibCancelBtn = document.getElementById("calib-cancel");
+        let calibActive = false;
+
+        function openCalibration() {
+            calibActive = true;
+            releaseAll();
+            gazeDot.style.display = "none";
+            calibEl.querySelectorAll(".calib-pt").forEach((n) => n.remove());
+            const positions = [];
+            for (const py of [0.1, 0.5, 0.9]) for (const px of [0.1, 0.5, 0.9]) positions.push([px, py]);
+            const CLICKS = 5;
+            let remaining = positions.length;
+            positions.forEach(([px, py]) => {
+                const dot = document.createElement("div");
+                dot.className = "calib-pt";
+                dot.style.left = (px * 100) + "%";
+                dot.style.top  = (py * 100) + "%";
+                let clicks = 0;
+                dot.textContent = CLICKS;
+                dot.addEventListener("click", () => {
+                    clicks++;
+                    dot.textContent = Math.max(0, CLICKS - clicks);
+                    if (clicks >= CLICKS) {
+                        dot.classList.add("done");
+                        dot.textContent = "✓";
+                        dot.style.pointerEvents = "none";
+                        if (--remaining === 0) closeCalibration();
+                    }
+                });
+                calibEl.appendChild(dot);
+            });
+            calibEl.classList.add("show");
+        }
+        function closeCalibration() {
+            calibEl.classList.remove("show");
+            calibActive = false;
+            if (gazeDotVisible) gazeDot.style.display = "block";
+        }
+        calibCancelBtn.addEventListener("click", closeCalibration);
+
+        // toolbar
+        const toggleBtn = document.getElementById("eye-toggle");
+        const calibBtn  = document.getElementById("eye-calibrate");
+        const debugBtn  = document.getElementById("eye-debug");
+        const dwellBack   = document.getElementById("dwell-back");
+        const dwellSelect = document.getElementById("dwell-select");
+
+        let webgazerReady = false;
+        let webgazerOn = false;
+
+        function showDwellButtons(show) {
+            dwellBack.classList.toggle("show", show);
+            dwellSelect.classList.toggle("show", show);
+        }
+
+        async function startWebgazer() {
+            if (typeof webgazer === "undefined") {
+                alert("WebGazer failed to load — check your internet connection.");
+                return;
+            }
+            toggleBtn.textContent = "STARTING…";
+            toggleBtn.disabled = true;
+            try {
+                webgazer.params.showVideoPreview = true;
+                webgazer.params.showFaceOverlay = false;
+                webgazer.params.showFaceFeedbackBox = false;
+                webgazer.showPredictionPoints(false);
+                await webgazer
+                    .setRegression("ridge")
+                    .setGazeListener((data) => onGaze(data))
+                    .begin();
+                webgazerReady = true;
+                webgazerOn = true;
+                toggleBtn.textContent = "DISABLE EYE TRACKING";
+                toggleBtn.classList.add("active");
+                toggleBtn.disabled = false;
+                calibBtn.disabled = false;
+                debugBtn.disabled = false;
+                showDwellButtons(true);
+                setTimeout(() => { if (webgazerOn && gazeBuf.length < 5) openCalibration(); }, 800);
+            } catch (e) {
+                console.error(e);
+                alert("Could not access webcam. Allow camera permission and try again.");
+                toggleBtn.textContent = "ENABLE EYE TRACKING";
+                toggleBtn.disabled = false;
+            }
+        }
+        function stopWebgazer() {
+            if (!webgazerReady) return;
+            webgazerOn = false;
+            try { webgazer.pause(); webgazer.showVideoPreview(false); } catch (_) {}
+            releaseAll();
+            gazeDot.style.display = "none";
+            toggleBtn.textContent = "ENABLE EYE TRACKING";
+            toggleBtn.classList.remove("active");
+            calibBtn.disabled = true;
+            debugBtn.disabled = true;
+            showDwellButtons(false);
+        }
+
+        toggleBtn.addEventListener("click", () => {
+            if (!webgazerReady) startWebgazer();
+            else if (webgazerOn) stopWebgazer();
+            else {
+                webgazer.resume(); webgazer.showVideoPreview(true);
+                webgazerOn = true;
+                toggleBtn.textContent = "DISABLE EYE TRACKING";
+                toggleBtn.classList.add("active");
+                calibBtn.disabled = false; debugBtn.disabled = false;
+                showDwellButtons(true);
+            }
+        });
+        calibBtn.addEventListener("click", openCalibration);
+        debugBtn.addEventListener("click", () => {
+            gazeDotVisible = !gazeDotVisible;
+            debugBtn.textContent = gazeDotVisible ? "HIDE GAZE DOT" : "SHOW GAZE DOT";
+            if (!gazeDotVisible) gazeDot.style.display = "none";
+        });
+
+        // preload webgazer in the background
+        (function loadWebgazer() {
+            if (typeof webgazer !== "undefined") return;
+            const s = document.createElement("script");
+            s.src = "https://webgazer.cs.brown.edu/webgazer.js";
+            s.onerror = () => console.warn("webgazer load failed");
+            document.head.appendChild(s);
+        })();
+    })();
+    </script>
 
     <script type="application/javascript">
 
