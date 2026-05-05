@@ -300,35 +300,31 @@ function show_infobox() {
         .eye-btn.active { background: rgba(0, 60, 0, 0.85); }
         .eye-btn[disabled] { opacity: 0.35; cursor: not-allowed; }
 
-        .dwell-btn {
+        #heatmap {
             position: fixed;
-            bottom: 16px;
-            width: 200px;
-            height: 70px;
-            background: rgba(0, 0, 0, 0.75);
-            border: 1px solid #00e600;
+            inset: 0;
+            pointer-events: none;
+            z-index: 50;
+            display: none;
+            mix-blend-mode: screen;
+        }
+        #heatmap.show { display: block; }
+
+        #stats {
+            position: fixed;
+            top: 8px;
+            right: 12px;
             color: #00e600;
             font-family: "Courier New", Courier, monospace;
-            font-size: 14px;
-            letter-spacing: 4px;
-            display: none;
-            align-items: center;
-            justify-content: center;
+            font-size: 11px;
+            letter-spacing: 2px;
+            background: rgba(0, 0, 0, 0.65);
+            border: 1px solid #003c00;
+            padding: 4px 10px;
             z-index: 1000;
-            overflow: hidden;
+            display: none;
         }
-        .dwell-btn.show { display: flex; }
-        .dwell-btn.armed { box-shadow: 0 0 20px #00e600; }
-        .dwell-btn .fill {
-            position: absolute;
-            inset: 0 auto 0 0;
-            width: 0%;
-            background: rgba(0, 230, 0, 0.20);
-            transition: width 60ms linear;
-        }
-        .dwell-btn .label { position: relative; z-index: 2; }
-        #dwell-back   { left: 16px;  }
-        #dwell-select { right: 16px; }
+        #stats.show { display: block; }
 
         #gaze-dot {
             position: fixed;
@@ -479,22 +475,18 @@ frameborder="1"
         <div id="terminal" tabIndex=1 align="left"></div>
     </div>
 
-    <!-- eye tracking UI -->
+    <!-- eye tracking UI (observation mode — playtest analytics) -->
     <div id="eye-toolbar">
         <button class="eye-btn" id="eye-toggle">ENABLE EYE TRACKING</button>
         <button class="eye-btn" id="eye-calibrate" disabled>CALIBRATE</button>
-        <button class="eye-btn" id="eye-debug" disabled>HIDE GAZE DOT</button>
+        <button class="eye-btn" id="eye-dot" disabled>HIDE GAZE DOT</button>
+        <button class="eye-btn" id="eye-heatmap" disabled>SHOW HEATMAP</button>
+        <button class="eye-btn" id="eye-clear" disabled>CLEAR</button>
+        <button class="eye-btn" id="eye-export" disabled>EXPORT CSV</button>
     </div>
 
-    <div class="dwell-btn" id="dwell-back" data-key="Escape">
-        <div class="fill"></div>
-        <div class="label">[ BACK ]</div>
-    </div>
-    <div class="dwell-btn" id="dwell-select" data-key=" ">
-        <div class="fill"></div>
-        <div class="label">[ SELECT ]</div>
-    </div>
-
+    <canvas id="heatmap"></canvas>
+    <div id="stats">SAMPLES: 0 · 00:00</div>
     <div id="gaze-dot"></div>
 
     <div id="calib">
@@ -507,43 +499,8 @@ frameborder="1"
 
     <script type="application/javascript">
     (function () {
-        const KEY_MAP = {
-            "ArrowUp":    { code: "ArrowUp",    keyCode: 38 },
-            "ArrowDown":  { code: "ArrowDown",  keyCode: 40 },
-            "ArrowLeft":  { code: "ArrowLeft",  keyCode: 37 },
-            "ArrowRight": { code: "ArrowRight", keyCode: 39 },
-            " ":          { code: "Space",      keyCode: 32 },
-            "Enter":      { code: "Enter",      keyCode: 13 },
-            "Escape":     { code: "Escape",     keyCode: 27 },
-        };
-
-        // dispatch synthetic key events to pygame's canvas (SDL2 listens on document/canvas)
-        function dispatchKey(key, down) {
-            const meta = KEY_MAP[key];
-            if (!meta) return;
-            const targets = [
-                document.getElementById("canvas"),
-                document.body,
-                document,
-                window,
-            ].filter(Boolean);
-            for (const t of targets) {
-                const ev = new KeyboardEvent(down ? "keydown" : "keyup", {
-                    key, code: meta.code, keyCode: meta.keyCode, which: meta.keyCode,
-                    bubbles: true, cancelable: true,
-                });
-                t.dispatchEvent(ev);
-            }
-        }
-
-        const heldKeys = new Set();
-        function pressKey(key)   { if (heldKeys.has(key)) return; heldKeys.add(key);    dispatchKey(key, true); }
-        function releaseKey(key) { if (!heldKeys.has(key)) return; heldKeys.delete(key); dispatchKey(key, false); }
-        function releaseAll()    { for (const k of [...heldKeys]) releaseKey(k); }
-        function tapKey(key)     { dispatchKey(key, true); setTimeout(() => dispatchKey(key, false), 80); }
-
-        // gaze smoothing
-        const GAZE_WINDOW = 8;
+        // ---------- gaze smoothing ----------
+        const GAZE_WINDOW = 6;
         const gazeBuf = [];
         function smoothGaze(x, y) {
             gazeBuf.push([x, y]);
@@ -553,66 +510,64 @@ frameborder="1"
             return [sx / gazeBuf.length, sy / gazeBuf.length];
         }
 
-        // arrow zones — full viewport, 40% dead zone in center
-        function zoneForGaze(gx, gy) {
-            const w = window.innerWidth, h = window.innerHeight;
-            if (gx < 0 || gx > w || gy < 0 || gy > h) return null;
-            const nx = gx / w, ny = gy / h;
-            const dx = nx - 0.5, dy = ny - 0.5;
-            const DZ = 0.20;
-            if (Math.abs(dx) < DZ && Math.abs(dy) < DZ) return "center";
-            if (Math.abs(dx) > Math.abs(dy)) return dx < 0 ? "ArrowLeft" : "ArrowRight";
-            return dy < 0 ? "ArrowUp" : "ArrowDown";
+        // ---------- heatmap ----------
+        const heatmap = document.getElementById("heatmap");
+        const hctx = heatmap.getContext("2d");
+        function sizeHeatmap() {
+            heatmap.width = window.innerWidth;
+            heatmap.height = window.innerHeight;
+        }
+        sizeHeatmap();
+        window.addEventListener("resize", sizeHeatmap);
+
+        // additive radial blob — accumulating samples make hotspots brighter
+        function addHeatPoint(x, y) {
+            const r = 36;
+            const grad = hctx.createRadialGradient(x, y, 0, x, y, r);
+            grad.addColorStop(0.0, "rgba(255, 60, 0, 0.18)");
+            grad.addColorStop(0.5, "rgba(255, 200, 0, 0.06)");
+            grad.addColorStop(1.0, "rgba(0, 80, 255, 0.00)");
+            hctx.globalCompositeOperation = "lighter";
+            hctx.fillStyle = grad;
+            hctx.beginPath();
+            hctx.arc(x, y, r, 0, Math.PI * 2);
+            hctx.fill();
+        }
+        function clearHeatmap() {
+            hctx.clearRect(0, 0, heatmap.width, heatmap.height);
         }
 
-        // dwell buttons
-        const DWELL_MS = 900;
-        const dwellBtns = [...document.querySelectorAll(".dwell-btn")];
-        const dwellState = new Map(dwellBtns.map((b) => [b, { entered: 0, fired: false }]));
-        function updateDwell(gx, gy, now) {
-            for (const btn of dwellBtns) {
-                const r = btn.getBoundingClientRect();
-                const inside = gx >= r.left && gx <= r.right && gy >= r.top && gy <= r.bottom;
-                const st = dwellState.get(btn);
-                const fillEl = btn.querySelector(".fill");
-                if (inside) {
-                    if (st.entered === 0) { st.entered = now; st.fired = false; }
-                    const elapsed = now - st.entered;
-                    fillEl.style.width = Math.min(100, (elapsed / DWELL_MS) * 100) + "%";
-                    btn.classList.add("armed");
-                    if (!st.fired && elapsed >= DWELL_MS) {
-                        st.fired = true;
-                        tapKey(btn.dataset.key);
-                        fillEl.style.width = "100%";
-                        setTimeout(() => { fillEl.style.width = "0%"; st.entered = 0; }, 200);
-                    }
-                } else {
-                    st.entered = 0;
-                    st.fired = false;
-                    fillEl.style.width = "0%";
-                    btn.classList.remove("armed");
-                }
-            }
-        }
+        // ---------- recording ----------
+        // each sample: { t: ms since session start, x, y, vw, vh }
+        const samples = [];
+        let sessionStartMs = 0;
+        let sessionStartIso = "";
 
-        // gaze loop
+        // ---------- gaze loop ----------
         const gazeDot = document.getElementById("gaze-dot");
-        const ZONE_HOLD_MS = 120;
-        let currentArrow = null;
-        let candidateArrow = null;
-        let candidateSince = 0;
+        const statsEl = document.getElementById("stats");
         let lastGazeAt = 0;
         let gazeDotVisible = true;
+        let heatmapVisible = false;
+
+        function fmtElapsed(ms) {
+            const s = Math.floor(ms / 1000);
+            const mm = String(Math.floor(s / 60)).padStart(2, "0");
+            const ss = String(s % 60).padStart(2, "0");
+            return `${mm}:${ss}`;
+        }
+        let lastStatsUpdate = 0;
+        function updateStats(now) {
+            if (now - lastStatsUpdate < 250) return;
+            lastStatsUpdate = now;
+            const elapsed = sessionStartMs ? now - sessionStartMs : 0;
+            statsEl.textContent = `SAMPLES: ${samples.length} · ${fmtElapsed(elapsed)}`;
+        }
 
         function onGaze(data) {
-            if (!data) {
-                if (performance.now() - lastGazeAt > 250) {
-                    releaseAll();
-                    currentArrow = candidateArrow = null;
-                }
-                return;
-            }
-            lastGazeAt = performance.now();
+            if (!data) return;
+            const now = performance.now();
+            lastGazeAt = now;
             const [x, y] = smoothGaze(data.x, data.y);
 
             if (gazeDotVisible) {
@@ -621,18 +576,40 @@ frameborder="1"
                 gazeDot.style.top  = y + "px";
             }
 
-            if (!calibActive) updateDwell(x, y, lastGazeAt);
-
-            const zone = zoneForGaze(x, y);
-            const next = (zone && zone !== "center" && KEY_MAP[zone]) ? zone : null;
-            if (next !== candidateArrow) { candidateArrow = next; candidateSince = lastGazeAt; }
-            const stable = lastGazeAt - candidateSince >= ZONE_HOLD_MS;
-            const target = stable ? candidateArrow : currentArrow;
-            if (target !== currentArrow) {
-                if (currentArrow) releaseKey(currentArrow);
-                if (target) pressKey(target);
-                currentArrow = target;
+            // record
+            if (sessionStartMs) {
+                samples.push({
+                    t: Math.round(now - sessionStartMs),
+                    x: Math.round(x),
+                    y: Math.round(y),
+                    vw: window.innerWidth,
+                    vh: window.innerHeight,
+                });
+                addHeatPoint(x, y);
+                updateStats(now);
             }
+        }
+
+        // ---------- export ----------
+        function exportCSV() {
+            if (samples.length === 0) {
+                alert("No samples recorded yet.");
+                return;
+            }
+            const header = "session_start_iso,t_ms,x_px,y_px,viewport_w,viewport_h\n";
+            const rows = samples.map(s =>
+                `${sessionStartIso},${s.t},${s.x},${s.y},${s.vw},${s.vh}`
+            ).join("\n");
+            const blob = new Blob([header + rows + "\n"], { type: "text/csv" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            const stamp = sessionStartIso.replace(/[:.]/g, "-");
+            a.href = url;
+            a.download = `databreach_gaze_${stamp}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
         }
 
         // calibration
@@ -642,7 +619,6 @@ frameborder="1"
 
         function openCalibration() {
             calibActive = true;
-            releaseAll();
             gazeDot.style.display = "none";
             calibEl.querySelectorAll(".calib-pt").forEach((n) => n.remove());
             const positions = [];
@@ -677,19 +653,23 @@ frameborder="1"
         }
         calibCancelBtn.addEventListener("click", closeCalibration);
 
-        // toolbar
-        const toggleBtn = document.getElementById("eye-toggle");
-        const calibBtn  = document.getElementById("eye-calibrate");
-        const debugBtn  = document.getElementById("eye-debug");
-        const dwellBack   = document.getElementById("dwell-back");
-        const dwellSelect = document.getElementById("dwell-select");
+        // ---------- toolbar ----------
+        const toggleBtn  = document.getElementById("eye-toggle");
+        const calibBtn   = document.getElementById("eye-calibrate");
+        const dotBtn     = document.getElementById("eye-dot");
+        const heatmapBtn = document.getElementById("eye-heatmap");
+        const clearBtn   = document.getElementById("eye-clear");
+        const exportBtn  = document.getElementById("eye-export");
 
         let webgazerReady = false;
         let webgazerOn = false;
 
-        function showDwellButtons(show) {
-            dwellBack.classList.toggle("show", show);
-            dwellSelect.classList.toggle("show", show);
+        function setActionButtonsEnabled(on) {
+            calibBtn.disabled = !on;
+            dotBtn.disabled = !on;
+            heatmapBtn.disabled = !on;
+            clearBtn.disabled = !on;
+            exportBtn.disabled = !on;
         }
 
         async function startWebgazer() {
@@ -710,13 +690,14 @@ frameborder="1"
                     .begin();
                 webgazerReady = true;
                 webgazerOn = true;
+                sessionStartMs = performance.now();
+                sessionStartIso = new Date().toISOString();
                 toggleBtn.textContent = "DISABLE EYE TRACKING";
                 toggleBtn.classList.add("active");
                 toggleBtn.disabled = false;
-                calibBtn.disabled = false;
-                debugBtn.disabled = false;
-                showDwellButtons(true);
-                setTimeout(() => { if (webgazerOn && gazeBuf.length < 5) openCalibration(); }, 800);
+                statsEl.classList.add("show");
+                setActionButtonsEnabled(true);
+                setTimeout(() => { if (webgazerOn && samples.length < 5) openCalibration(); }, 800);
             } catch (e) {
                 console.error(e);
                 alert("Could not access webcam. Allow camera permission and try again.");
@@ -728,13 +709,13 @@ frameborder="1"
             if (!webgazerReady) return;
             webgazerOn = false;
             try { webgazer.pause(); webgazer.showVideoPreview(false); } catch (_) {}
-            releaseAll();
             gazeDot.style.display = "none";
             toggleBtn.textContent = "ENABLE EYE TRACKING";
             toggleBtn.classList.remove("active");
+            // keep export+clear enabled so the user can still grab the data
             calibBtn.disabled = true;
-            debugBtn.disabled = true;
-            showDwellButtons(false);
+            dotBtn.disabled = true;
+            heatmapBtn.disabled = true;
         }
 
         toggleBtn.addEventListener("click", () => {
@@ -743,18 +724,35 @@ frameborder="1"
             else {
                 webgazer.resume(); webgazer.showVideoPreview(true);
                 webgazerOn = true;
+                if (!sessionStartMs) {
+                    sessionStartMs = performance.now();
+                    sessionStartIso = new Date().toISOString();
+                }
                 toggleBtn.textContent = "DISABLE EYE TRACKING";
                 toggleBtn.classList.add("active");
-                calibBtn.disabled = false; debugBtn.disabled = false;
-                showDwellButtons(true);
+                setActionButtonsEnabled(true);
             }
         });
         calibBtn.addEventListener("click", openCalibration);
-        debugBtn.addEventListener("click", () => {
+        dotBtn.addEventListener("click", () => {
             gazeDotVisible = !gazeDotVisible;
-            debugBtn.textContent = gazeDotVisible ? "HIDE GAZE DOT" : "SHOW GAZE DOT";
+            dotBtn.textContent = gazeDotVisible ? "HIDE GAZE DOT" : "SHOW GAZE DOT";
             if (!gazeDotVisible) gazeDot.style.display = "none";
         });
+        heatmapBtn.addEventListener("click", () => {
+            heatmapVisible = !heatmapVisible;
+            heatmap.classList.toggle("show", heatmapVisible);
+            heatmapBtn.textContent = heatmapVisible ? "HIDE HEATMAP" : "SHOW HEATMAP";
+        });
+        clearBtn.addEventListener("click", () => {
+            if (!confirm("Clear all recorded gaze data?")) return;
+            samples.length = 0;
+            clearHeatmap();
+            sessionStartMs = performance.now();
+            sessionStartIso = new Date().toISOString();
+            updateStats(performance.now());
+        });
+        exportBtn.addEventListener("click", exportCSV);
 
         // preload webgazer in the background
         (function loadWebgazer() {
