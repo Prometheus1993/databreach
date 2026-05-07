@@ -52,11 +52,12 @@ def _get_mono_font(size):
             return f
     return pygame.font.Font(None, size)
 
-FONT_SM = _get_mono_font(16)
-FONT_MD = _get_mono_font(20)
-FONT_LG = _get_mono_font(28)
-FONT_XL = _get_mono_font(42)
-FONT_TITLE = _get_mono_font(56)
+FONT_SM = _get_mono_font(20)
+FONT_MD = _get_mono_font(26)
+FONT_LG = _get_mono_font(36)
+FONT_XL = _get_mono_font(52)
+FONT_TITLE = _get_mono_font(68)
+FONT_HUGE = _get_mono_font(96)
 
 # --- SOUND (disabled - placeholder stubs) ------------------------------------
 def play_sound(snd):
@@ -385,15 +386,21 @@ FILE_REVEALED = build_revealed(INTEL)
 STAGE_LINES = [[0, 1], [2, 3, 4], [5, 6]]
 
 DEBRIEF_QUESTIONS = [
-    ("What is the TARGET of the attack?", "target"),
-    ("What CITY is the attack located in?", "location"),
-    ("What is the operation CODE name?", "code"),
-    ("What DATE is the attack planned? (MM-DD)", "date"),
-    ("What TIME is the attack scheduled?", "time"),
-    ("Who is the lead OPERATIVE?", "operatives"),
-    ("What METHOD of attack will be used?", "method"),
-    ("Who is the primary CONTACT?", "contact"),
+    ("TARGET",     "target"),
+    ("LOCATION",   "location"),
+    ("CODE",       "code"),
+    ("DATE",       "date"),
+    ("TIME",       "time"),
+    ("OPERATIVE",  "operatives"),
+    ("METHOD",     "method"),
+    ("CONTACT",    "contact"),
 ]
+# Which mission stage unlocks each question (matches STAGE_LINES grouping):
+QUESTION_STAGE = {
+    "target": 0, "code": 0, "location": 0,
+    "date": 1, "time": 1, "operatives": 1, "method": 1,
+    "contact": 2,
+}
 
 MATRIX_CHARS = "01234567890ABCDEF!@#$%&*<>{}[]=/\\|~^;:.,?+-_abcdef"
 
@@ -489,30 +496,34 @@ def draw_text_centered(surface, text, y, font=FONT_SM, color=GREEN):
     surface.blit(ts, ((WIDTH - ts.get_width()) // 2, y))
 
 def draw_timer_bar(surface, remaining, total, y=HEIGHT - 140):
-    bar_x, bar_w, bar_h = 20, WIDTH - 40, 24
-    # Background
-    pygame.draw.rect(surface, DARK_GREEN, (bar_x, y, bar_w, bar_h))
-    # Fill
-    pct = max(0, remaining / total) if total > 0 else 0
-    fill_w = int(bar_w * pct)
-    if pct > 0.5:
-        color = GREEN
-    elif pct > 0.25:
+    """Big numeric countdown in the top-right of the screen.
+    Color shifts green → yellow under 10s → red under 5s (blinking).
+    The y / total args are kept so existing callers don't break."""
+    secs = max(0, int(remaining + 0.5))
+    if remaining > 10:
+        color = GREEN_BRIGHT
+    elif remaining > 5:
         color = YELLOW
     else:
-        color = RED
-        # Pulse effect when critical
-        if remaining > 0 and int(time.time() * 4) % 2:
-            color = RED_BRIGHT
-    pygame.draw.rect(surface, color, (bar_x, y, fill_w, bar_h))
-    # Border
-    border_c = RED_BRIGHT if pct < 0.15 and remaining > 0 and int(time.time() * 4) % 2 else GREEN
-    pygame.draw.rect(surface, border_c, (bar_x, y, bar_w, bar_h), 1)
-    # Text
-    time_str = f"TIME: {max(0, int(remaining))}s"
-    if remaining <= 10 and remaining > 0:
-        time_str += " !! HURRY !!"
-    draw_text(surface, time_str, bar_x + 8, y + 3, FONT_SM, BLACK if pct > 0.3 else WHITE)
+        color = RED_BRIGHT if int(time.time() * 4) % 2 else RED
+
+    label_surf = FONT_SM.render("TIME LEFT", True, GREEN_DIM)
+    timer_surf = FONT_HUGE.render(f"{secs:02d}", True, color)
+
+    pad = 14
+    box_w = max(label_surf.get_width(), timer_surf.get_width()) + pad * 2
+    box_h = label_surf.get_height() + timer_surf.get_height() + pad
+    box_x = WIDTH - box_w - 16
+    box_y = 14
+
+    bg = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+    bg.fill((0, 0, 0, 200))
+    pygame.draw.rect(bg, color, (0, 0, box_w, box_h), 2)
+    surface.blit(bg, (box_x, box_y))
+
+    surface.blit(label_surf, (box_x + (box_w - label_surf.get_width()) // 2, box_y + 6))
+    surface.blit(timer_surf, (box_x + (box_w - timer_surf.get_width()) // 2,
+                              box_y + label_surf.get_height() + 4))
 
 def draw_file_status(surface, x, y, stages_completed, font=FONT_SM):
     """stages_completed: set of completed stage indices, e.g. {0, 2}"""
@@ -1097,15 +1108,8 @@ class Game:
                 self._update_debrief(events, dt)
                 self._draw_debrief()
 
-            # Disruption events, comms, screen hacks (gameplay only)
-            if self.state in ("roulette", "maze", "connect") and not self.paused:
-                self._update_events(dt)
-                self._draw_event_overlay()
-                self._update_hack(dt)
-                self._draw_hack_overlay()
-            if self.state in ("roulette", "maze", "connect", "intel") and not self.paused:
-                self._update_comms(dt)
-                self._draw_comms()
+            # Disruption events / comms / hacks disabled — playtesters found
+            # the visual noise distracting. The functions remain but are no-ops.
 
 
             # Flash overlay
@@ -1145,11 +1149,28 @@ class Game:
         draw_pixel_text_centered(screen, "BREACH", 190, 8, GREEN_BRIGHT, DARK_GREEN)
 
         y = 260
-        draw_text_centered(screen, "[ CLASSIFIED TERMINAL v2.049 ]", y + 30, FONT_SM, GREEN_DIM)
+        draw_text_centered(screen, "[ CLASSIFIED TERMINAL v2.049 ]", y + 30, FONT_MD, GREEN_DIM)
 
-        # Blink
+        # Blink "press any key"
         if int(self.rain_timer * 2) % 2 == 0:
-            draw_text_centered(screen, ">>> PRESS ANY KEY TO CONNECT <<<", y + 70, FONT_MD, GREEN)
+            draw_text_centered(screen, ">>> PRESS ANY KEY TO CONNECT <<<", y + 80, FONT_LG, GREEN)
+
+        # Highlight: keyboard-only — pulsing yellow border
+        kbd_y = y + 160
+        msg = "KEYBOARD ONLY  ·  NO MOUSE"
+        sub = "Arrow keys · Enter · Space · Esc"
+        msg_surf = FONT_LG.render(msg, True, YELLOW)
+        sub_surf = FONT_MD.render(sub, True, GREEN_DIM)
+        pad_x, pad_y = 30, 16
+        box_w = max(msg_surf.get_width(), sub_surf.get_width()) + pad_x * 2
+        box_h = msg_surf.get_height() + sub_surf.get_height() + pad_y * 2 + 8
+        box_x = (WIDTH - box_w) // 2
+        pulse = int(abs(math.sin(self.rain_timer * 3)) * 60) + 180
+        border = (pulse, pulse, 0)
+        pygame.draw.rect(screen, border, (box_x, kbd_y, box_w, box_h), 2)
+        screen.blit(msg_surf, (box_x + (box_w - msg_surf.get_width()) // 2, kbd_y + pad_y))
+        screen.blit(sub_surf, (box_x + (box_w - sub_surf.get_width()) // 2,
+                               kbd_y + pad_y + msg_surf.get_height() + 6))
 
     # -- MENU -------------------------------------------------------------
     def _has_saved_progress(self):
@@ -1217,42 +1238,23 @@ class Game:
         rain_surf.set_alpha(40)
         screen.blit(rain_surf, (0, 0))
 
-        # Border
         pygame.draw.rect(screen, GREEN, (10, 10, WIDTH-20, HEIGHT-20), 1)
 
-        # Title (smaller pixel blocks)
-        draw_pixel_text_centered(screen, "DATA", 30, 5, GREEN, DARK_GREEN)
-        draw_pixel_text_centered(screen, "BREACH", 70, 5, GREEN, DARK_GREEN)
-        y = 115
+        # Title
+        draw_pixel_text_centered(screen, "DATA", 24, 6, GREEN, DARK_GREEN)
+        draw_pixel_text_centered(screen, "BREACH", 70, 6, GREEN, DARK_GREEN)
+        y = 140
 
-        # Records
-        y += 20
-        draw_text_centered(screen, "--- AGENT RECORDS ---", y, FONT_SM, GREEN_DIM)
-        y += 22
-        sd = load_save()
-        has_records = False
-        for dk in DIFFICULTY_ORDER:
-            best = sd.get("best", {}).get(dk)
-            if best:
-                has_records = True
-                draw_text_centered(screen, f"{dk}: {best}", y, FONT_SM, CYAN)
-                y += 20
-        if not has_records:
-            draw_text_centered(screen, "No records yet.", y, FONT_SM, GREEN_DIM)
-            y += 20
-
-        # Show saved progress info above menu if exists
-        y += 20
+        # Saved progress (compact)
         sd_prog = load_save().get("in_progress")
         if sd_prog:
             rem = int(sd_prog.get("remaining", 0))
-            diff_name = sd_prog.get("difficulty", "?")
             stages = sd_prog.get("stages_done", set())
             stages_n = len(stages) if isinstance(stages, (set, list)) else stages
-            draw_text_centered(screen, "--- SAVED MISSION ---", y, FONT_SM, CYAN)
-            y += 22
-            draw_text_centered(screen, f"Difficulty: {diff_name}   |   Redacted: {stages_n}/3   |   Time left: {rem}s", y, FONT_SM, CYAN_BRIGHT)
-            y += 30
+            draw_text_centered(screen,
+                f"SAVED MISSION  ·  {sd_prog.get('difficulty', '?')}  ·  {stages_n}/3  ·  {rem}s left",
+                y, FONT_MD, CYAN_BRIGHT)
+            y += 36
         else:
             y += 10
 
@@ -1260,25 +1262,53 @@ class Game:
         menu_items = self._get_menu_items()
         for i, (label, _subtitle) in enumerate(menu_items):
             if i == self.menu_cursor:
-                tw = FONT_MD.size(f"  >>  {label}  ")[0]
+                tw = FONT_LG.size(f"  >>  {label}  ")[0]
                 bx = (WIDTH - tw) // 2 - 5
-                pygame.draw.rect(screen, GREEN_DIM, (bx, y - 2, tw + 10, 30))
-                draw_text_centered(screen, f"  >>  {label}  ", y, FONT_MD, GREEN_BRIGHT)
+                pygame.draw.rect(screen, GREEN_DIM, (bx, y - 4, tw + 10, FONT_LG.get_linesize() + 6))
+                draw_text_centered(screen, f"  >>  {label}  ", y, FONT_LG, GREEN_BRIGHT)
             else:
                 color = CYAN if label == "CONTINUE" else GREEN
-                draw_text_centered(screen, f"     {label}  ", y, FONT_MD, color)
-            y += 36
+                draw_text_centered(screen, f"     {label}  ", y, FONT_LG, color)
+            y += FONT_LG.get_linesize() + 4
 
-        # Difficulty info
-        y += 10
-        di = DIFFICULTIES[self.selected_diff]
-        draw_text_centered(screen, di["description"], y, FONT_SM, GREEN_DIM)
-        y += 22
-        total_t = di['roulette_time'] + di['maze_time'] + di['connect_time'] + di['intel_time']
-        info = f"Total: {total_t}s | Digits: {di['roulette_digits']} | Nodes: {di['num_nodes']} | Retries: {di['intel_attempts']}"
-        draw_text_centered(screen, info, y, FONT_SM, GREEN_DIM)
-        y += 30
-        draw_text_centered(screen, "UP/DN Select  |  ENTER Confirm  |  L/R Change Difficulty", y, FONT_SM, GREEN_DIM)
+        # Difficulty comparison panel — always visible so players can compare
+        # the four levels at a glance. Highlight the selected one.
+        y += 16
+        panel_w = WIDTH - 80
+        panel_x = 40
+        panel_y = y
+        col_w = panel_w // 5  # name col + 4 difficulty cols
+        # header row
+        draw_text(screen, "DIFFICULTY", panel_x + 14, panel_y, FONT_MD, GREEN_DIM)
+        for ci, dk in enumerate(DIFFICULTY_ORDER):
+            cx = panel_x + col_w * (ci + 1) + 8
+            color = CYAN_BRIGHT if dk == self.selected_diff else GREEN_DIM
+            draw_text(screen, dk, cx, panel_y, FONT_MD, color)
+        py = panel_y + FONT_MD.get_linesize() + 6
+        rows = [
+            ("Total time", lambda d: f"{d['roulette_time']+d['maze_time']+d['connect_time']+d['intel_time']}s"),
+            ("Code digits", lambda d: str(d["roulette_digits"])),
+            ("Maze size",   lambda d: f"{d['maze_size'][0]}x{d['maze_size'][1]}"),
+            ("Guards",      lambda d: str(d.get("maze_guards", 0))),
+            ("Fog of war",  lambda d: "yes" if d.get("maze_fog", 0) > 0 else "no"),
+            ("Nodes",       lambda d: str(d.get("num_nodes", 0))),
+            ("Intel tries", lambda d: str(d.get("intel_attempts", 1))),
+        ]
+        for label, fn in rows:
+            draw_text(screen, label, panel_x + 14, py, FONT_SM, GREEN)
+            for ci, dk in enumerate(DIFFICULTY_ORDER):
+                cx = panel_x + col_w * (ci + 1) + 8
+                color = CYAN_BRIGHT if dk == self.selected_diff else GREEN_DIM
+                draw_text(screen, fn(DIFFICULTIES[dk]), cx, py, FONT_SM, color)
+            py += FONT_SM.get_linesize() + 2
+        # frame around panel
+        panel_h = py - panel_y + 6
+        pygame.draw.rect(screen, GREEN_DIM, (panel_x, panel_y - 6, panel_w, panel_h), 1)
+
+        # Bottom hint
+        draw_text_centered(screen,
+            "UP/DN  Select   ·   ENTER  Confirm   ·   LEFT/RIGHT  Change Difficulty",
+            HEIGHT - 36, FONT_SM, GREEN_DIM)
 
     # -- PAUSE ----------------------------------------------------------------
     def _unpause(self):
@@ -1493,7 +1523,7 @@ class Game:
         global INTEL, FILE_REVEALED
         INTEL = generate_intel()
         FILE_REVEALED = build_revealed(INTEL)
-        # Reset event/comms/hack state for new mission
+        # Reset disabled-but-still-referenced subsystem state for safety
         self.event_active = None
         self.event_timer = 0
         self.event_cooldown = 5.0
@@ -1509,204 +1539,140 @@ class Game:
         self.hack_timer = 0
         self.hack_cooldown = 10.0
         self.state = "briefing"
-        self.typewriter_lines = [
-            ("INCOMING TRANSMISSION...", GREEN, 0.05),
-            ("", None, 0),
-            ("FROM: DIRECTOR KNOX - CENTRAL COMMAND", CYAN, 0.03),
-            ("TO:   AGENT CIPHER", CYAN, 0.03),
-            ("RE:   OPERATION BLACKOUT - PRIORITY ALPHA", RED, 0.03),
-            ("", None, 0),
-            ("Agent, we've intercepted a file containing details", GREEN, 0.02),
-            ("of an imminent attack on civilian infrastructure.", GREEN, 0.02),
-            ("", None, 0),
-            ("The file must be REDACTED before it can be leaked.", YELLOW, 0.02),
-            ("Three security protocols guard the redaction system:", GREEN, 0.02),
-            ("", None, 0),
-            ("  [1] ACCESS CODE ROULETTE - Crack the rotating cipher", GREEN, 0.02),
-            ("  [2] MAZE EXTRACTION - Retrieve the decryption key", GREEN, 0.02),
-            ("  [3] NODE LINK - Connect the network to finish redaction", GREEN, 0.02),
-            ("", None, 0),
-            ("Each protocol has its own time limit. Fail, and the file goes public.", RED, 0.03),
-            ("", None, 0),
-            ("Good luck, Agent. The world is counting on you.", GREEN, 0.03),
-        ]
-        self.tw_line_idx = 0
-        self.tw_char_idx = 0
-        self.tw_timer = 0
-        self.tw_done = False
+        self.brief_t = 0.0
 
     def _update_briefing(self, events, dt):
-        if not self.tw_done:
-            if self.tw_line_idx < len(self.typewriter_lines):
-                text, color, delay = self.typewriter_lines[self.tw_line_idx]
-                if text == "" or delay == 0:
-                    self.tw_line_idx += 1
-                    self.tw_char_idx = 0
-                else:
-                    self.tw_timer += dt
-                    if self.tw_timer >= delay:
-                        self.tw_timer = 0
-                        self.tw_char_idx += 1
-                        play_sound(None)
-                        if self.tw_char_idx >= len(text):
-                            self.tw_line_idx += 1
-                            self.tw_char_idx = 0
-            else:
-                self.tw_done = True
-
+        self.brief_t += dt
         for e in events:
             if e.type == pygame.KEYDOWN:
-                if self.tw_done:
-                    # All text visible -- now proceed
-                    self.stages_done = set()
-                    self._start_transition("roulette", "ACCESS CODE ROULETTE")
-                else:
-                    # First press: skip typewriter, show all text instantly
-                    self.tw_line_idx = len(self.typewriter_lines)
-                    self.tw_char_idx = 0
-                    self.tw_done = True
+                self.stages_done = set()
+                self._start_transition("roulette", "ACCESS CODE ROULETTE")
+                return
 
     def _draw_briefing(self):
         pygame.draw.rect(screen, GREEN, (10, 10, WIDTH-20, HEIGHT-20), 1)
-        draw_text(screen, "[ SECURE CHANNEL - HQ ]", 20, 12, FONT_SM, GREEN)
+        draw_text(screen, "[ NEW MISSION ]", 20, 14, FONT_MD, GREEN)
 
-        y = 50
-        for i in range(min(self.tw_line_idx + 1, len(self.typewriter_lines))):
-            text, color, delay = self.typewriter_lines[i]
-            if text == "":
-                y += 10
-                continue
-            if color is None:
-                color = GREEN
-            if i < self.tw_line_idx or self.tw_done:
-                draw_text(screen, text, 30, y, FONT_SM, color)
-            elif i == self.tw_line_idx:
-                partial = text[:self.tw_char_idx]
-                draw_text(screen, partial, 30, y, FONT_SM, color)
-                # Cursor
-                cw = FONT_SM.size(partial)[0]
-                if int(time.time() * 3) % 2:
-                    draw_text(screen, "_", 30 + cw, y, FONT_SM, color)
-            y += 22
+        # Big headline
+        draw_text_centered(screen, "REDACTED FILE INCOMING", 60, FONT_XL, CYAN_BRIGHT)
 
-        if self.tw_done:
-            y += 30
-            if int(time.time() * 2) % 2:
-                draw_text_centered(screen, ">>> PRESS ANY KEY TO BEGIN REDACTION <<<", y, FONT_MD, GREEN)
+        # The redacted file, big and centered
+        file_font = FONT_MD
+        lh = file_font.get_linesize() + 2
+        total_lines = len(FILE_HEADER) + len(FILE_REDACTED) + 2  # + footer-sep + bottom
+        file_w = file_font.size(FILE_HEADER[0])[0]
+        file_x = (WIDTH - file_w) // 2
+        file_y = 150
+        row_y = file_y
+        for line in FILE_HEADER:
+            draw_text(screen, line, file_x, row_y, file_font, GREEN)
+            row_y += lh
+        for i in range(len(FILE_REDACTED)):
+            draw_text(screen, FILE_REDACTED[i], file_x, row_y, file_font, GREEN_DIM)
+            row_y += lh
+        draw_text(screen, FILE_FOOTER_SEP, file_x, row_y, file_font, GREEN)
+        row_y += lh
+        draw_text(screen, FILE_BOTTOM, file_x, row_y, file_font, GREEN)
+        row_y += lh
+
+        # Mission instruction
+        instr_y = row_y + 30
+        draw_text_centered(screen, "Unredact this file by completing 3 challenges.",
+                           instr_y, FONT_LG, YELLOW)
+
+        # Press to begin (blinking)
+        if int(self.brief_t * 2) % 2 == 0:
+            draw_text_centered(screen, ">>> PRESS ENTER TO BEGIN <<<",
+                               HEIGHT - 70, FONT_LG, GREEN_BRIGHT)
 
     # -- TRANSITION -------------------------------------------------------
     def _get_transition_instructions(self):
-        """Build instructions for the upcoming minigame, with difficulty hints."""
+        """Build short, plain-language instructions for the upcoming minigame."""
         diff = self.diff
         next_state = self.trans_next
 
         if next_state == "roulette":
-            lines = [
-                ("A code is cycling on screen. One digit at a time.", GREEN),
+            return "PROTOCOL 1 — ACCESS CODE", [
+                ("Match the rotating digits to the TARGET CODE.", GREEN),
                 ("Press SPACE to lock the current digit.", GREEN),
-                ("Match the TARGET CODE shown at the top.", GREEN),
                 ("", None),
-                ("DIFFICULTY NOTE:", YELLOW),
+                (f"Time: {diff['roulette_time']}s   ·   Digits: {diff['roulette_digits']}", CYAN),
+                ("Each correct digit grants +3 seconds.", GREEN_DIM),
             ]
-            n = diff["roulette_digits"]
-            lines.append((f"  Time limit: {diff['roulette_time']} seconds", CYAN))
-            lines.append((f"  Code length: {n} digits", GREEN))
-            if not diff.get("roulette_keep", True):
-                lines.append(("  A wrong lock RESETS all digits!", RED))
-            else:
-                lines.append(("  Wrong lock? Only that digit resets.", GREEN))
-            lines.append(("  Each correct digit adds +3 seconds!", GREEN))
-            lines += [
-                ("", None),
-                ("CONTROLS:", CYAN),
-                ("  SPACE ........ Lock current digit", GREEN),
-            ]
-            return "PROTOCOL 1: ACCESS CODE ROULETTE", lines
-
         elif next_state == "maze":
-            lines = [
-                ("Navigate the maze to find the KEY (*) first.", GREEN),
-                ("Finding the key unlocks a gap in the wall.", GREEN),
-                ("Escape through the gap to complete the maze!", GREEN),
-                ("", None),
-                ("DIFFICULTY NOTE:", YELLOW),
-            ]
             mw, mh = diff["maze_size"]
-            lines.append((f"  Time limit: {diff['maze_time']} seconds", CYAN))
-            lines.append((f"  Maze size: {mw} x {mh}", GREEN))
+            lines = [
+                ("Find the KEY, then escape through the EXIT.", GREEN),
+                ("Use the ARROW KEYS to move.", GREEN),
+                ("", None),
+                (f"Time: {diff['maze_time']}s   ·   Size: {mw}x{mh}", CYAN),
+            ]
+            if diff.get("maze_guards", 0) > 0:
+                lines.append((f"{diff['maze_guards']} guard(s) — avoid their sight!", RED))
             if diff.get("maze_fog", 0) > 0:
-                lines.append(("  FOG OF WAR is active - limited vision!", RED))
-            else:
-                lines.append(("  Full visibility - no fog.", GREEN))
-            guards = diff.get("maze_guards", 0)
-            if guards > 0:
-                lines.append((f"  {guards} SECURITY PATROL(S) active!", RED))
-                lines.append(("  Avoid their line of sight or lose 8 seconds!", RED))
-            lines.append(("  Collect green [+] pickups for +10 seconds!", GREEN))
-            lines += [
-                ("", None),
-                ("CONTROLS:", CYAN),
-                ("  ARROW KEYS ... Move through the maze", GREEN),
-            ]
-            return "PROTOCOL 2: MAZE EXTRACTION", lines
-
+                lines.append(("Fog of war is active.", RED))
+            return "PROTOCOL 2 — EXTRACTION", lines
         elif next_state == "connect":
-            lines = [
+            return "PROTOCOL 3 — NODE LINK", [
                 ("Connect the numbered nodes IN ORDER.", GREEN),
-                ("Move up/down/left/right - no diagonals.", GREEN),
-                ("Navigate around RED obstacles.", GREEN),
-                ("Your trail must NOT cross itself!", YELLOW),
+                ("ARROW KEYS to move. Don't cross your trail.", GREEN),
                 ("", None),
-                ("DIFFICULTY NOTE:", YELLOW),
+                (f"Time: {diff['connect_time']}s   ·   Nodes: {diff.get('num_nodes', 4)}", CYAN),
+                ("R resets all trails.", GREEN_DIM),
             ]
-            lines.append((f"  Time limit: {diff['connect_time']} seconds", CYAN))
-            mode = diff.get("node_cross_mode", "none")
-            if mode == "full":
-                lines.append(("  Crossing your trail = FULL RESET!", RED))
-            elif mode == "last":
-                lines.append(("  Crossing your trail = reset to last node.", YELLOW))
-            else:
-                lines.append(("  Trail crossing has no penalty.", GREEN))
-            nodes = diff.get("num_nodes", 4)
-            obs = diff.get("num_obstacles", 4)
-            gates = diff.get("num_gates", 0)
-            info = f"  Nodes: {nodes}  |  Obstacles: {obs}"
-            if gates > 0:
-                info += f"  |  Gates: {gates}"
-            lines.append((info, GREEN))
-            if gates > 0:
-                lines.append(("  GATES lock certain nodes. Pass through a gate", YELLOW))
-                lines.append(("  to unlock its node before you can connect!", YELLOW))
-            lines.append(("  Each node linked adds +5 seconds!", GREEN))
-            lines += [
-                ("", None),
-                ("CONTROLS:", CYAN),
-                ("  ARROW KEYS ... Move", GREEN),
-                ("  R ............ Reset all trails", GREEN),
-            ]
-            return "PROTOCOL 3: NODE LINK", lines
-
         elif next_state == "intel":
-            lines = [
-                ("The redacted file is revealed based on protocols completed.", GREEN),
-                ("Read the file and answer each question.", GREEN),
-                ("Choose the correct answer from 4 options.", GREEN),
+            return "INTEL PHASE", [
+                ("Type the missing words back into the file.", GREEN),
+                ("Lines you UNLOCKED show the answer in cyan.", CYAN),
+                ("Locked lines: type your best guess.", GREEN),
                 ("", None),
-                ("DIFFICULTY NOTE:", YELLOW),
+                (f"Time: {diff['intel_time']}s   ·   Tries per slot: {diff.get('intel_attempts', 3)}", CYAN),
+                ("ARROWS switch slot · letters/numbers to type · ENTER submit", GREEN_DIM),
             ]
-            lines.append((f"  Time limit: {diff['intel_time']} seconds", CYAN))
-            tries = diff.get("intel_attempts", 3)
-            lines.append((f"  Attempts per question: {tries}", GREEN if tries > 1 else RED))
-            lines += [
-                ("", None),
-                ("CONTROLS:", CYAN),
-                ("  UP/DN ........ Select answer", GREEN),
-                ("  LEFT/RIGHT ... Switch question", GREEN),
-                ("  ENTER ........ Confirm answer", GREEN),
-            ]
-            return "INTEL PHASE: TRANSMIT TO HQ", lines
-
         return self.trans_label, []
+
+    def _draw_maze_legend(self, x, y, w):
+        """Quick visual legend explaining the icons used in the maze."""
+        title = FONT_MD.render("MAZE ICONS", True, CYAN)
+        screen.blit(title, (x + (w - title.get_width()) // 2, y))
+        y += title.get_height() + 12
+        # rows: (icon-draw-fn, label, color)
+        row_h = 44
+        cs = 28  # icon cell size
+        ix = x + 30
+        # Key — yellow diamond
+        cy = y + row_h // 2
+        pygame.draw.polygon(screen, YELLOW, [(ix + cs // 2, cy - cs // 2),
+                                              (ix + cs, cy),
+                                              (ix + cs // 2, cy + cs // 2),
+                                              (ix, cy)])
+        draw_text(screen, "KEY  —  pick up first to open the exit",
+                  ix + cs + 18, cy - FONT_MD.get_height() // 2, FONT_MD, YELLOW)
+        y += row_h
+        # Exit — pulsing cyan square
+        cy = y + row_h // 2
+        pygame.draw.rect(screen, CYAN_BRIGHT, (ix, cy - cs // 2, cs, cs))
+        pygame.draw.rect(screen, WHITE, (ix, cy - cs // 2, cs, cs), 1)
+        draw_text(screen, "EXIT —  step here AFTER grabbing the key",
+                  ix + cs + 18, cy - FONT_MD.get_height() // 2, FONT_MD, CYAN_BRIGHT)
+        y += row_h
+        # Time pickup — green plus
+        cy = y + row_h // 2
+        pygame.draw.line(screen, GREEN_BRIGHT,
+                         (ix, cy), (ix + cs, cy), 5)
+        pygame.draw.line(screen, GREEN_BRIGHT,
+                         (ix + cs // 2, cy - cs // 2), (ix + cs // 2, cy + cs // 2), 5)
+        draw_text(screen, "+10s — extra time pickup",
+                  ix + cs + 18, cy - FONT_MD.get_height() // 2, FONT_MD, GREEN_BRIGHT)
+        y += row_h
+        # Guard — red dot
+        if self.diff.get("maze_guards", 0) > 0:
+            cy = y + row_h // 2
+            pygame.draw.circle(screen, RED, (ix + cs // 2, cy), cs // 2)
+            draw_text(screen, "GUARD — stay out of their line of sight",
+                      ix + cs + 18, cy - FONT_MD.get_height() // 2, FONT_MD, RED_BRIGHT)
+            y += row_h
+        return y
 
     # -- RESULT SCREEN (post-minigame, pre-transition) ----------------------
     def _start_result(self, success, text, next_state, label):
@@ -1773,58 +1739,62 @@ class Game:
         # Result content on a separate surface for alpha fade-in
         content = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
 
+        # Which stage just resolved? Derive from result_next.
+        next_to_stage = {"maze": 0, "connect": 1, "intel": 2}
+        completed_stage = next_to_stage.get(self.result_next, -1)
+        unlocked_lines = STAGE_LINES[completed_stage] if completed_stage >= 0 else []
+
         if self.result_success:
             t = time.time()
             pulse = int(abs(math.sin(t * 3)) * 80) + 175
             pygame.draw.rect(content, (0, pulse, pulse, content_alpha), (10, 10, WIDTH - 20, HEIGHT - 20), 3)
-            cx, cy = WIDTH // 2, HEIGHT // 2
-            for i in range(5):
-                r = int((t * 80 + i * 50) % 300)
-                a = max(0, min(content_alpha, 200 - r))
-                pygame.draw.circle(content, (0, 230, 230, a), (cx, cy), r, 2)
-            ts1 = FONT_LG.render("PROTOCOL COMPLETE", True, CYAN_BRIGHT)
+            ts1 = FONT_XL.render("PROTOCOL COMPLETE", True, CYAN_BRIGHT)
             ts1.set_alpha(content_alpha)
-            content.blit(ts1, ((WIDTH - ts1.get_width()) // 2, HEIGHT // 2 - 50))
-            ts2 = FONT_MD.render(self.result_text, True, GREEN)
-            ts2.set_alpha(content_alpha)
-            content.blit(ts2, ((WIDTH - ts2.get_width()) // 2, HEIGHT // 2))
+            content.blit(ts1, ((WIDTH - ts1.get_width()) // 2, 80))
+            sub = FONT_MD.render("FILE SECTION DECRYPTED", True, GREEN)
+            sub.set_alpha(content_alpha)
+            content.blit(sub, ((WIDTH - sub.get_width()) // 2, 80 + ts1.get_height() + 6))
+
+            # Show unlocked lines big and clear
+            label = FONT_MD.render("YOU JUST UNREDACTED:", True, GREEN_DIM)
+            label.set_alpha(content_alpha)
+            ly = 220
+            content.blit(label, ((WIDTH - label.get_width()) // 2, ly))
+            ly += label.get_height() + 14
+            for idx in unlocked_lines:
+                line_surf = FONT_MD.render(FILE_REVEALED[idx], True, CYAN_BRIGHT)
+                line_surf.set_alpha(content_alpha)
+                content.blit(line_surf, ((WIDTH - line_surf.get_width()) // 2, ly))
+                ly += line_surf.get_height() + 6
         else:
             t = time.time()
             pulse = int(abs(math.sin(t * 5)) * 80) + 175
             pygame.draw.rect(content, (pulse, 0, 0, content_alpha), (10, 10, WIDTH - 20, HEIGHT - 20), 3)
-            cx, cy = WIDTH // 2, HEIGHT // 2
-            random.seed(42)
-            for _ in range(12):
-                angle = random.uniform(0, math.pi * 2)
-                length = random.randint(100, 350)
-                ex = cx + int(math.cos(angle) * length)
-                ey = cy + int(math.sin(angle) * length)
-                pts = [(cx, cy)]
-                for seg in range(random.randint(2, 4)):
-                    frac = (seg + 1) / 4
-                    mx = cx + int(math.cos(angle) * length * frac) + random.randint(-30, 30)
-                    my = cy + int(math.sin(angle) * length * frac) + random.randint(-30, 30)
-                    pts.append((mx, my))
-                pts.append((ex, ey))
-                pygame.draw.lines(content, (255, 60, 60, content_alpha), False, pts, 2)
-            random.seed()
-            for _ in range(4):
-                by = random.randint(100, HEIGHT - 100)
-                bh = random.randint(2, 6)
-                pygame.draw.rect(content, (pulse, 0, 0, content_alpha), (0, by, WIDTH, bh))
-            ts1 = FONT_LG.render("PROTOCOL FAILED", True, RED_BRIGHT)
+            ts1 = FONT_XL.render("PROTOCOL FAILED", True, RED_BRIGHT)
             ts1.set_alpha(content_alpha)
-            content.blit(ts1, ((WIDTH - ts1.get_width()) // 2, HEIGHT // 2 - 50))
-            ts2 = FONT_MD.render(self.result_text, True, YELLOW)
-            ts2.set_alpha(content_alpha)
-            content.blit(ts2, ((WIDTH - ts2.get_width()) // 2, HEIGHT // 2))
+            content.blit(ts1, ((WIDTH - ts1.get_width()) // 2, 80))
+            sub = FONT_MD.render(self.result_text, True, YELLOW)
+            sub.set_alpha(content_alpha)
+            content.blit(sub, ((WIDTH - sub.get_width()) // 2, 80 + ts1.get_height() + 6))
+
+            # Show locked lines that stay redacted
+            label = FONT_MD.render("THIS STAYS REDACTED:", True, RED)
+            label.set_alpha(content_alpha)
+            ly = 220
+            content.blit(label, ((WIDTH - label.get_width()) // 2, ly))
+            ly += label.get_height() + 14
+            for idx in unlocked_lines:
+                line_surf = FONT_MD.render(FILE_REDACTED[idx], True, RED_BRIGHT)
+                line_surf.set_alpha(content_alpha)
+                content.blit(line_surf, ((WIDTH - line_surf.get_width()) // 2, ly))
+                ly += line_surf.get_height() + 6
 
         screen.blit(content, (0, 0))
 
         # Prompt (only after fade + lockout)
         if self.result_ready:
             if int(time.time() * 2) % 2:
-                draw_text_centered(screen, ">>> PRESS SPACE TO CONTINUE <<<", HEIGHT - 60, FONT_MD, WHITE)
+                draw_text_centered(screen, ">>> PRESS SPACE TO CONTINUE <<<", HEIGHT - 60, FONT_LG, WHITE)
 
     def _start_transition(self, next_state, label):
         self.state = "transition"
@@ -1866,58 +1836,40 @@ class Game:
 
     def _draw_transition(self):
         pygame.draw.rect(screen, GREEN, (10, 10, WIDTH-20, HEIGHT-20), 1)
-        rem = self.remaining_time()
-        draw_timer_bar(screen, rem, self.game_total)
+        title, instr_lines = self._get_transition_instructions()
 
-        file_x = (WIDTH - FONT_SM.size(FILE_HEADER[0])[0]) // 2
-        draw_file_status(screen, file_x, 50, self.stages_done)
+        # Big title
+        draw_text_centered(screen, "NEXT", 60, FONT_MD, GREEN_DIM)
+        draw_text_centered(screen, title, 100, FONT_XL, CYAN_BRIGHT)
 
-        if not self.trans_ready:
-            # Loading phase with progress bar
-            label = f"Initializing {self.trans_label}..."
-            draw_text_centered(screen, label, HEIGHT // 2 - 20, FONT_MD, YELLOW)
+        # Instructions — large, centered
+        y = 200
+        for text, color in instr_lines:
+            if text == "":
+                y += 14
+                continue
+            font = FONT_LG if (color in (GREEN, RED)) else FONT_MD
+            draw_text_centered(screen, text, y, font, color or GREEN)
+            y += font.get_linesize() + 4
 
-            bar_w = 300
-            bar_h = 12
-            bar_x = (WIDTH - bar_w) // 2
-            bar_y = HEIGHT // 2 + 20
-            progress = min(self.trans_timer / 1.5, 1.0)
-            pygame.draw.rect(screen, GREEN_DIM, (bar_x, bar_y, bar_w, bar_h), 1)
-            fill_w = int((bar_w - 4) * progress)
-            if fill_w > 0:
-                pygame.draw.rect(screen, GREEN, (bar_x + 2, bar_y + 2, fill_w, bar_h - 4))
+        # On the FIRST minigame (roulette), drop in a maze legend so players
+        # know what they'll see in protocol 2.
+        if self.trans_next == "roulette" and len(self.stages_done) == 0:
+            legend_w = 640
+            legend_x = (WIDTH - legend_w) // 2
+            legend_y = y + 20
+            pygame.draw.rect(screen, GREEN_DIM,
+                             (legend_x - 10, legend_y - 10, legend_w + 20, 220), 1)
+            self._draw_maze_legend(legend_x, legend_y, legend_w)
 
-            if int(time.time() * 3) % 2:
-                draw_text_centered(screen, "[ STAND BY ]", bar_y + 30, FONT_SM, GREEN_DIM)
-        else:
-            # Instructions screen - positioned below the file status
-            title, instr_lines = self._get_transition_instructions()
-
-            # Calculate where file status ends
-            lh = FONT_SM.get_linesize() + 2
-            file_lines = len(FILE_HEADER) + len(FILE_REDACTED) + 3  # header + redacted + footer/status/bottom
-            file_bottom = 50 + file_lines * lh + 15
-
-            # Title
-            draw_text_centered(screen, "=== " + title + " ===", file_bottom, FONT_MD, CYAN)
-
-            # Border box around instructions
-            box_x, box_w = 120, WIDTH - 240
-            box_y = file_bottom + 35
-            y = box_y + 12
-            for text, color in instr_lines:
-                if text == "":
-                    y += 10
-                    continue
-                draw_text_centered(screen, text, y, FONT_SM, color or GREEN)
-                y += 20
-            box_h = y - box_y + 8
-            pygame.draw.rect(screen, GREEN_DIM, (box_x, box_y, box_w, box_h), 1)
-
-            # Timer is paused notice + blinking prompt at bottom
-            draw_text_centered(screen, "[ TIMER PAUSED ]", HEIGHT - 80, FONT_SM, YELLOW)
+        # Bottom: prompt
+        if self.trans_ready:
             if int(time.time() * 2) % 2:
-                draw_text_centered(screen, ">>> PRESS ENTER TO START <<<", HEIGHT - 50, FONT_MD, GREEN)
+                draw_text_centered(screen, ">>> PRESS ENTER TO START <<<",
+                                   HEIGHT - 70, FONT_LG, GREEN_BRIGHT)
+        else:
+            # Brief load-in — no progress bar needed, just a hint
+            draw_text_centered(screen, "[ LOADING ]", HEIGHT - 70, FONT_LG, GREEN_DIM)
 
     # -- ROULETTE ---------------------------------------------------------
     def _scramble_roulette_digit(self):
@@ -2792,176 +2744,253 @@ class Game:
         if self.cn_warning_timer > 0:
             draw_text_centered(screen, self.cn_warning, HEIGHT - 180, FONT_SM, RED_BRIGHT)
 
-    # -- INTEL (multiple choice) ------------------------------------------
+    # -- INTEL (inline file typing) ---------------------------------------
     def _init_intel(self, restore=False):
-        self.intel_cursor = 0        # which question is active
-        self.intel_choice_cursor = 0 # which choice (A/B/C/D) is highlighted
+        self.intel_cursor = 0
+        self.intel_typed   = ["" for _ in DEBRIEF_QUESTIONS]
         self.intel_answers = [None] * len(DEBRIEF_QUESTIONS)
         self.intel_attempts = [self.diff["intel_attempts"]] * len(DEBRIEF_QUESTIONS)
         self.intel_correct = 0
+        self.intel_feedback = ""
+        self.intel_feedback_color = GREEN
+        self.intel_feedback_timer = 0.0
 
-        # Generate 4 multiple-choice options per question
-        self.intel_choices = []
-        for _, key in DEBRIEF_QUESTIONS:
-            correct = INTEL[key]
-            pool = [v for v in INTEL_POOL[key] if v != correct]
-            wrongs = random.sample(pool, min(3, len(pool)))
-            options = wrongs + [correct]
-            random.shuffle(options)
-            self.intel_choices.append(options)
+        # Pre-fill UNLOCKED slots with the correct answer (player just confirms).
+        for i, (_label, key) in enumerate(DEBRIEF_QUESTIONS):
+            if QUESTION_STAGE.get(key) in self.stages_done:
+                self.intel_typed[i] = INTEL[key].upper()
 
-        # Skip to first unanswered question
         self._intel_skip_done()
 
     def _intel_skip_done(self):
-        """Move cursor to the next unanswered question, if any."""
-        for _ in range(len(DEBRIEF_QUESTIONS)):
-            if self.intel_answers[self.intel_cursor] is not None or self.intel_attempts[self.intel_cursor] <= 0:
-                self.intel_cursor = (self.intel_cursor + 1) % len(DEBRIEF_QUESTIONS)
+        """Land cursor on the next unresolved slot, if any."""
+        n = len(DEBRIEF_QUESTIONS)
+        for _ in range(n):
+            if (self.intel_answers[self.intel_cursor] is not None or
+                self.intel_attempts[self.intel_cursor] <= 0):
+                self.intel_cursor = (self.intel_cursor + 1) % n
             else:
-                break
-        self.intel_choice_cursor = 0
+                return
+
+    def _intel_next_unresolved(self):
+        n = len(DEBRIEF_QUESTIONS)
+        for off in range(1, n + 1):
+            idx = (self.intel_cursor + off) % n
+            if self.intel_answers[idx] is None and self.intel_attempts[idx] > 0:
+                self.intel_cursor = idx
+                return
+
+    def _intel_submit(self):
+        i = self.intel_cursor
+        typed = self.intel_typed[i].strip()
+        if not typed:
+            return
+        key = DEBRIEF_QUESTIONS[i][1]
+        correct = INTEL[key].strip()
+        if typed.upper() == correct.upper():
+            self.intel_answers[i] = correct
+            self.intel_typed[i] = correct.upper()
+            self.intel_correct += 1
+            self.intel_feedback = "CORRECT"
+            self.intel_feedback_color = CYAN_BRIGHT
+            self.flash_timer = 0.12
+            self.flash_color = CYAN
+            self._intel_next_unresolved()
+        else:
+            self.intel_attempts[i] -= 1
+            if self.intel_attempts[i] <= 0:
+                self.intel_feedback = f"OUT OF TRIES — was {correct.upper()}"
+                self.intel_feedback_color = RED_BRIGHT
+            else:
+                self.intel_feedback = f"WRONG — {self.intel_attempts[i]} {'try' if self.intel_attempts[i] == 1 else 'tries'} left"
+                self.intel_feedback_color = RED
+            self.flash_timer = 0.18
+            self.flash_color = RED
+        self.intel_feedback_timer = 1.6
 
     def _update_intel(self, events, dt):
+        if self.intel_feedback_timer > 0:
+            self.intel_feedback_timer -= dt
+
         if self.remaining_time() <= 0:
             self._finish_intel()
             return
-
-        # Check if all done
-        all_done = all(a is not None or att <= 0 for a, att in zip(self.intel_answers, self.intel_attempts))
+        all_done = all(a is not None or att <= 0
+                       for a, att in zip(self.intel_answers, self.intel_attempts))
         if all_done:
             self._finish_intel()
             return
 
+        n = len(DEBRIEF_QUESTIONS)
         for e in events:
-            if e.type == pygame.KEYDOWN:
-                q_idx = self.intel_cursor
-                choices = self.intel_choices[q_idx]
-                num_choices = len(choices)
+            if e.type != pygame.KEYDOWN:
+                continue
+            i = self.intel_cursor
+            resolved = (self.intel_answers[i] is not None or
+                        self.intel_attempts[i] <= 0)
 
-                if e.key == pygame.K_UP:
-                    self.intel_choice_cursor = (self.intel_choice_cursor - 1) % num_choices
-                    play_sound(None)
-                elif e.key == pygame.K_DOWN:
-                    self.intel_choice_cursor = (self.intel_choice_cursor + 1) % num_choices
-                    play_sound(None)
-                elif e.key == pygame.K_LEFT:
-                    # Move to previous question
-                    self.intel_cursor = (self.intel_cursor - 1) % len(DEBRIEF_QUESTIONS)
-                    self.intel_choice_cursor = 0
-                    play_sound(None)
-                elif e.key == pygame.K_RIGHT:
-                    # Move to next question
-                    self.intel_cursor = (self.intel_cursor + 1) % len(DEBRIEF_QUESTIONS)
-                    self.intel_choice_cursor = 0
-                    play_sound(None)
-                elif e.key in (pygame.K_RETURN, pygame.K_SPACE):
-                    # Only allow answering if not already answered and has attempts
-                    if self.intel_answers[q_idx] is None and self.intel_attempts[q_idx] > 0:
-                        selected = choices[self.intel_choice_cursor]
-                        key = DEBRIEF_QUESTIONS[q_idx][1]
-                        if selected == INTEL[key]:
-                            self.intel_answers[q_idx] = selected
-                            self.intel_correct += 1
-                            self.flash_timer = 0.15
-                            self.flash_color = CYAN
-                            play_sound(None)
-                        else:
-                            self.intel_attempts[q_idx] -= 1
-                            self.flash_timer = 0.2
-                            self.flash_color = RED
-                            play_sound(None)
-                        # Auto-advance to next unanswered
-                        self._intel_skip_done()
+            if e.key in (pygame.K_LEFT, pygame.K_UP):
+                self.intel_cursor = (i - 1) % n
+                self.intel_feedback_timer = 0
+            elif e.key in (pygame.K_RIGHT, pygame.K_DOWN):
+                self.intel_cursor = (i + 1) % n
+                self.intel_feedback_timer = 0
+            elif resolved:
+                # Resolved slots only allow navigation
+                continue
+            elif e.key == pygame.K_BACKSPACE:
+                self.intel_typed[i] = self.intel_typed[i][:-1]
+            elif e.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                self._intel_submit()
+            elif e.unicode and len(self.intel_typed[i]) < 24:
+                ch = e.unicode
+                if ch.isalnum() or ch in "-' :.,/$":
+                    self.intel_typed[i] += ch.upper()
 
     def _finish_intel(self):
         self.state = "debrief"
         self._compute_rank()
-        if self.intel_correct >= len(DEBRIEF_QUESTIONS) * 0.5:
-            play_sound(None)
-        else:
-            play_sound(None)
+
+    # ---- intel rendering helpers ----
+    def _intel_slot_rect(self, line_idx, key):
+        """Approximate (x, y, w, h) for a redacted slot in the rendered file.
+        Used for the visual highlight box when a slot is selected."""
+        # Best-effort: the file is monospace, but layout has fixed columns.
+        # We just box the whole line; that's clear enough for the player.
+        font = FONT_MD
+        lh = font.get_linesize() + 2
+        file_w = font.size(FILE_HEADER[0])[0]
+        file_x = (WIDTH - file_w) // 2
+        # File starts at y=20 with 3 header lines, then redacted lines
+        line_y = 20 + len(FILE_HEADER) * lh + line_idx * lh
+        return (file_x, line_y, file_w, lh)
 
     def _draw_intel(self):
-        pygame.draw.rect(screen, GREEN, (10, 5, WIDTH-20, HEIGHT-155), 1)
+        pygame.draw.rect(screen, GREEN, (10, 10, WIDTH - 20, HEIGHT - 20), 1)
         draw_timer_bar(screen, self.remaining_time(), self.game_total)
 
-
-        # File display (top, centered)
-        file_w = FONT_SM.size(FILE_HEADER[0])[0]
+        # ----- FILE at top (full file with mixed unlocked/redacted lines) -----
+        font = FONT_MD
+        lh = font.get_linesize() + 2
+        file_w = font.size(FILE_HEADER[0])[0]
         file_x = (WIDTH - file_w) // 2
-        row_end = draw_file_status(screen, file_x, 20, self.stages_done)
+        y = 20
+        for line in FILE_HEADER:
+            draw_text(screen, line, file_x, y, font, GREEN)
+            y += lh
+        # Build a per-line rendering: unlocked stage → cyan revealed; locked → redacted
+        for i in range(len(FILE_REDACTED)):
+            stage = next((s for s, lines in enumerate(STAGE_LINES) if i in lines), -1)
+            if stage in self.stages_done:
+                draw_text(screen, FILE_REVEALED[i], file_x, y, font, CYAN)
+            else:
+                draw_text(screen, FILE_REDACTED[i], file_x, y, font, GREEN_DIM)
+            y += lh
+        draw_text(screen, FILE_FOOTER_SEP, file_x, y, font, GREEN)
+        y += lh
+        draw_text(screen, FILE_BOTTOM, file_x, y, font, GREEN)
+        y += lh + 12
 
-        # Questions panel (below the file)
-        qy = row_end + 12
-        q_idx = self.intel_cursor
-        question, key = DEBRIEF_QUESTIONS[q_idx]
-        att = self.intel_attempts[q_idx]
-        ans = self.intel_answers[q_idx]
+        # ----- Active slot box (the question being answered) -----
+        i = self.intel_cursor
+        label, key = DEBRIEF_QUESTIONS[i]
+        ans = self.intel_answers[i]
+        att = self.intel_attempts[i]
+        unlocked = QUESTION_STAGE.get(key) in self.stages_done
 
-        # Question navigation dots + counter
-        dot_x = 40
-        for i in range(len(DEBRIEF_QUESTIONS)):
-            a = self.intel_answers[i]
-            at = self.intel_attempts[i]
+        # Map question key to file row so we can highlight the current line
+        KEY_TO_ROW = {
+            "target": 0, "code": 0, "location": 1,
+            "date": 2, "time": 2, "operatives": 3, "method": 4,
+            "contact": 6,
+        }
+        row = KEY_TO_ROW.get(key)
+        if row is not None:
+            ry = 20 + len(FILE_HEADER) * lh + row * lh
+            pulse = int(abs(math.sin(time.time() * 3)) * 60) + 160
+            pygame.draw.rect(screen, (pulse, pulse, 0),
+                             (file_x - 6, ry - 2, file_w + 12, lh + 2), 2)
+
+        # Question dots row (overall progress)
+        dy = y
+        dot_x = (WIDTH - len(DEBRIEF_QUESTIONS) * 60) // 2
+        for j, (lbl, k) in enumerate(DEBRIEF_QUESTIONS):
+            a = self.intel_answers[j]
+            at_j = self.intel_attempts[j]
             if a is not None:
-                c = CYAN
-            elif at <= 0:
-                c = RED
-            elif i == self.intel_cursor:
-                c = WHITE
+                c, marker = CYAN, "✓"
+            elif at_j <= 0:
+                c, marker = RED, "✗"
+            elif j == self.intel_cursor:
+                c, marker = WHITE, "▸"
             else:
-                c = GREEN_DIM
-            draw_text(screen, f"[{i+1}]", dot_x, qy, FONT_SM, c)
-            dot_x += 35
+                c, marker = GREEN_DIM, "•"
+            draw_text(screen, f"{marker} {lbl[:3]}", dot_x, dy, FONT_SM, c)
+            dot_x += 60
+        y = dy + FONT_SM.get_linesize() + 16
 
-        # Status on the right of dots
-        att_color = GREEN if att == self.diff["intel_attempts"] else (YELLOW if att > 0 else RED)
+        # Big input area
+        prompt = f"TYPE THE  {label}"
+        draw_text_centered(screen, prompt, y, FONT_LG, YELLOW)
+        y += FONT_LG.get_linesize() + 8
+
+        # Hint line
         if ans is not None:
-            draw_text(screen, "CORRECT", dot_x + 20, qy, FONT_SM, CYAN)
+            hint = "✓ CORRECT — confirmed"
+            hint_color = CYAN_BRIGHT
         elif att <= 0:
-            draw_text(screen, "FAILED", dot_x + 20, qy, FONT_SM, RED)
+            hint = f"✗ FAILED — answer was: {INTEL[key].upper()}"
+            hint_color = RED_BRIGHT
+        elif unlocked:
+            hint = "UNLOCKED — answer is shown above. Press ENTER to confirm."
+            hint_color = CYAN
         else:
-            draw_text(screen, f"Tries: {att}", dot_x + 20, qy, FONT_SM, att_color)
+            hint = f"Tries left: {att}   ·   Type your answer, then ENTER"
+            hint_color = GREEN_DIM
+        draw_text_centered(screen, hint, y, FONT_MD, hint_color)
+        y += FONT_MD.get_linesize() + 14
 
-        draw_text(screen, "< L/R >", WIDTH - 100, qy, FONT_SM, GREEN_DIM)
-        qy += 26
+        # Input box
+        box_w = 760
+        box_h = FONT_LG.get_linesize() + 24
+        box_x = (WIDTH - box_w) // 2
+        if ans is not None:
+            border = CYAN_BRIGHT
+        elif att <= 0:
+            border = RED_BRIGHT
+        elif unlocked:
+            border = CYAN
+        else:
+            border = GREEN_BRIGHT
+        pygame.draw.rect(screen, (0, 20, 0), (box_x, y, box_w, box_h))
+        pygame.draw.rect(screen, border, (box_x, y, box_w, box_h), 2)
+        typed = self.intel_typed[i]
+        if ans is not None:
+            disp = ans.upper()
+            disp_color = CYAN_BRIGHT
+        elif att <= 0:
+            disp = INTEL[key].upper()
+            disp_color = RED_BRIGHT
+        else:
+            disp = typed
+            disp_color = WHITE if not unlocked else CYAN
+        ts = FONT_LG.render(disp, True, disp_color)
+        screen.blit(ts, (box_x + 16, y + (box_h - ts.get_height()) // 2))
+        # blinking cursor when active
+        if ans is None and att > 0 and int(time.time() * 2) % 2 == 0:
+            cx = box_x + 16 + ts.get_width() + 2
+            cy0 = y + 8
+            cy1 = y + box_h - 8
+            pygame.draw.line(screen, border, (cx, cy0), (cx, cy1), 2)
+        y += box_h + 14
 
-        # The question
-        draw_text(screen, question, 40, qy, FONT_MD, YELLOW)
-        qy += 30
+        # Feedback flash
+        if self.intel_feedback_timer > 0 and self.intel_feedback:
+            draw_text_centered(screen, self.intel_feedback, y, FONT_MD, self.intel_feedback_color)
 
-        # Multiple choice options in a vertical list
-        choices = self.intel_choices[q_idx]
-        letters = "ABCD"
-        for ci, option in enumerate(choices):
-            is_sel = (ci == self.intel_choice_cursor)
-            prefix = ">" if is_sel else " "
-            letter = letters[ci] if ci < len(letters) else str(ci + 1)
-
-            if ans is not None:
-                if option == INTEL[key]:
-                    color = CYAN
-                else:
-                    color = GREEN_DIM
-            elif att <= 0:
-                if option == INTEL[key]:
-                    color = RED
-                else:
-                    color = GREEN_DIM
-            elif is_sel:
-                color = WHITE
-            else:
-                color = GREEN
-
-            draw_text(screen, f"{prefix} [{letter}] {option}", 60, qy, FONT_SM, color)
-            qy += 22
-
-        # Summary at bottom
-        answered = sum(1 for a in self.intel_answers if a is not None)
-        failed = sum(1 for a, att in zip(self.intel_answers, self.intel_attempts) if a is None and att <= 0)
-        remaining_q = len(DEBRIEF_QUESTIONS) - answered - failed
-        draw_text(screen, f"CORRECT: {answered}  |  FAILED: {failed}  |  REMAINING: {remaining_q}  |  UP/DN select, ENTER confirm", 30, HEIGHT - 25, FONT_SM, GREEN)
+        # Bottom controls hint
+        controls = "ARROWS  switch slot   ·   letters/numbers  type   ·   BACKSPACE  delete   ·   ENTER  submit"
+        draw_text_centered(screen, controls, HEIGHT - 32, FONT_SM, GREEN_DIM)
 
     # -- DEBRIEF ----------------------------------------------------------
     def _compute_rank(self):
