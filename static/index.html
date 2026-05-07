@@ -497,6 +497,18 @@
         toggleBtn.textContent = "STARTING…";
         toggleBtn.disabled = true;
         try {
+          // MediaPipe FaceMesh otherwise fetches assets relative to this host
+          // and 404s — pin it to jsDelivr so it actually loads.
+          if (typeof window.FaceMesh === "function" && !window.__faceMeshPatched) {
+            const OrigFM = window.FaceMesh;
+            window.FaceMesh = function (opts) {
+              return new OrigFM({
+                locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`,
+                ...(opts || {}),
+              });
+            };
+            window.__faceMeshPatched = true;
+          }
           webgazer.params.showVideoPreview = true;
           webgazer.params.showFaceOverlay = false;
           webgazer.params.showFaceFeedbackBox = false;
@@ -559,7 +571,7 @@
         return new Promise((resolve, reject) => {
           if (typeof webgazer !== "undefined") return resolve();
           const s = document.createElement("script");
-          s.src = "https://webgazer.cs.brown.edu/webgazer.js";
+          s.src = "https://cdn.jsdelivr.net/npm/webgazer@3.3.0/dist/webgazer.min.js";
           s.onload = () => resolve();
           s.onerror = () => reject(new Error("webgazer load failed"));
           document.head.appendChild(s);
