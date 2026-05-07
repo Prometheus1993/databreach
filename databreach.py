@@ -402,6 +402,21 @@ QUESTION_STAGE = {
     "contact": 2,
 }
 
+# Vertical-list view of the redacted file — used by the briefing AND the intel
+# phase so both screens look identical. (label, intel-key, unlock-stage)
+INTEL_FIELDS = [
+    ("TARGET",    "target",     0),
+    ("LOCATION",  "location",   0),
+    ("CODE",      "code",       0),
+    ("DATE",      "date",       1),
+    ("TIME",      "time",       1),
+    ("OPERATIVE", "operatives", 1),
+    ("METHOD",    "method",     1),
+    ("FUNDING",   "funding",    2),
+    ("SOURCE",    "source",     2),
+    ("CONTACT",   "contact",    2),
+]
+
 MATRIX_CHARS = "01234567890ABCDEF!@#$%&*<>{}[]=/\\|~^;:.,?+-_abcdef"
 
 # --- CRT EFFECTS -------------------------------------------------------------
@@ -524,6 +539,52 @@ def draw_timer_bar(surface, remaining, total, y=HEIGHT - 140):
     surface.blit(label_surf, (box_x + (box_w - label_surf.get_width()) // 2, box_y + 6))
     surface.blit(timer_surf, (box_x + (box_w - timer_surf.get_width()) // 2,
                               box_y + label_surf.get_height() + 4))
+
+def draw_vertical_file(surface, x, y, stages_completed, font=FONT_LG,
+                       active_key=None, intel=None):
+    """Render the redacted file as a vertical list — one field per row.
+    Each row reveals its value (cyan) when its stage is completed,
+    otherwise shows a redacted bar.
+
+    Used by the briefing AND the intel phase so they match.
+    Returns the y of the row immediately below the list."""
+    intel = intel if intel is not None else INTEL
+    label_w = max(font.size(lbl)[0] for lbl, _k, _s in INTEL_FIELDS)
+    bar_w = 480
+    row_h = font.get_linesize() + 8
+    total_w = label_w + 40 + bar_w
+
+    for i, (lbl, key, stage_idx) in enumerate(INTEL_FIELDS):
+        ry = y + i * row_h
+        unlocked = stage_idx in stages_completed
+        is_active = (active_key is not None and key == active_key)
+
+        # Active row gets a pulsing yellow border
+        if is_active:
+            pulse = int(abs(math.sin(time.time() * 3)) * 60) + 160
+            pygame.draw.rect(surface, (pulse, pulse, 0),
+                             (x - 8, ry - 4, total_w + 16, row_h + 2), 2)
+
+        # Label
+        label_color = WHITE if is_active else GREEN_DIM
+        label_surf = font.render(lbl, True, label_color)
+        surface.blit(label_surf, (x, ry))
+        # Colon
+        colon_surf = font.render(":", True, GREEN_DIM)
+        surface.blit(colon_surf, (x + label_w + 8, ry))
+        # Value or redacted block
+        bar_x = x + label_w + 40
+        bar_h = font.get_height() - 4
+        if unlocked:
+            value = intel[key].upper()
+            val_surf = font.render(value, True, CYAN)
+            surface.blit(val_surf, (bar_x, ry))
+        else:
+            pygame.draw.rect(surface, (0, 40, 0), (bar_x, ry + 2, bar_w, bar_h))
+            block = font.render("█" * 14, True, GREEN_DIM)
+            surface.blit(block, (bar_x + 6, ry))
+
+    return y + len(INTEL_FIELDS) * row_h
 
 def draw_file_status(surface, x, y, stages_completed, font=FONT_SM):
     """stages_completed: set of completed stage indices, e.g. {0, 2}"""
@@ -1554,43 +1615,18 @@ class Game:
         draw_text(screen, "[ NEW MISSION ]", 20, 14, FONT_MD, GREEN)
 
         # Big headline
-        draw_text_centered(screen, "REDACTED FILE INCOMING", 70, FONT_XL, CYAN_BRIGHT)
+        draw_text_centered(screen, "REDACTED FILE INCOMING", 60, FONT_XL, CYAN_BRIGHT)
 
-        # Vertical list of fields — one per line, easy to scan.
-        FIELDS = [
-            "TARGET", "LOCATION", "CODE",
-            "DATE", "TIME", "OPERATIVE",
-            "METHOD", "FUNDING", "SOURCE", "CONTACT",
-        ]
-        label_font = FONT_LG
-        value_font = FONT_LG
-        # widest label decides the colon-column
-        label_w = max(label_font.size(f)[0] for f in FIELDS)
-        rows_y = 170
-        row_h = label_font.get_linesize() + 8
-        list_w = label_w + 40 + 360  # label gutter + redacted bar
+        # Shared vertical-file layout — same one used in the intel phase
+        font = FONT_LG
+        label_w = max(font.size(lbl)[0] for lbl, _k, _s in INTEL_FIELDS)
+        list_w = label_w + 40 + 480
         list_x = (WIDTH - list_w) // 2
-
-        for i, fld in enumerate(FIELDS):
-            ry = rows_y + i * row_h
-            # label
-            label_surf = label_font.render(fld, True, GREEN_DIM)
-            screen.blit(label_surf, (list_x, ry))
-            # colon
-            colon = label_font.render(":", True, GREEN_DIM)
-            screen.blit(colon, (list_x + label_w + 8, ry))
-            # redacted bar (faded blocks)
-            bar_x = list_x + label_w + 40
-            bar_w = 360
-            bar_h = label_font.get_height() - 6
-            pygame.draw.rect(screen, (0, 40, 0),
-                             (bar_x, ry + 3, bar_w, bar_h))
-            # decorative "█" pattern (just a checker so it reads as redacted)
-            block = label_font.render("█" * 12, True, GREEN_DIM)
-            screen.blit(block, (bar_x + 6, ry))
+        list_y = 150
+        end_y = draw_vertical_file(screen, list_x, list_y, set(), font=font)
 
         # Mission instruction below the list
-        instr_y = rows_y + len(FIELDS) * row_h + 30
+        instr_y = end_y + 24
         draw_text_centered(screen, "Unredact this file by completing 3 challenges.",
                            instr_y, FONT_LG, YELLOW)
 
@@ -2980,47 +3016,18 @@ class Game:
         pygame.draw.rect(screen, GREEN, (10, 10, WIDTH - 20, HEIGHT - 20), 1)
         draw_timer_bar(screen, self.remaining_time(), self.game_total)
 
-        # ----- FILE at top (full file with mixed unlocked/redacted lines) -----
-        font = FONT_MD
-        lh = font.get_linesize() + 2
-        file_w = font.size(FILE_HEADER[0])[0]
-        file_x = (WIDTH - file_w) // 2
-        y = 20
-        for line in FILE_HEADER:
-            draw_text(screen, line, file_x, y, font, GREEN)
-            y += lh
-        # Build a per-line rendering: unlocked stage → cyan revealed; locked → redacted
-        for i in range(len(FILE_REDACTED)):
-            stage = next((s for s, lines in enumerate(STAGE_LINES) if i in lines), -1)
-            if stage in self.stages_done:
-                draw_text(screen, FILE_REVEALED[i], file_x, y, font, CYAN)
-            else:
-                draw_text(screen, FILE_REDACTED[i], file_x, y, font, GREEN_DIM)
-            y += lh
-        draw_text(screen, FILE_FOOTER_SEP, file_x, y, font, GREEN)
-        y += lh
-        draw_text(screen, FILE_BOTTOM, file_x, y, font, GREEN)
-        y += lh + 12
-
-        # ----- Active slot box (the question being answered) -----
+        # ----- FILE at top — same vertical layout as the briefing -----
         i = self.intel_cursor
         label, key = DEBRIEF_QUESTIONS[i]
         ans = self.intel_answers[i]
         att = self.intel_attempts[i]
-        unlocked = QUESTION_STAGE.get(key) in self.stages_done
 
-        # Map question key to file row so we can highlight the current line
-        KEY_TO_ROW = {
-            "target": 0, "code": 0, "location": 1,
-            "date": 2, "time": 2, "operatives": 3, "method": 4,
-            "contact": 6,
-        }
-        row = KEY_TO_ROW.get(key)
-        if row is not None:
-            ry = 20 + len(FILE_HEADER) * lh + row * lh
-            pulse = int(abs(math.sin(time.time() * 3)) * 60) + 160
-            pygame.draw.rect(screen, (pulse, pulse, 0),
-                             (file_x - 6, ry - 2, file_w + 12, lh + 2), 2)
+        font = FONT_MD
+        label_w = max(font.size(lbl)[0] for lbl, _k, _s in INTEL_FIELDS)
+        list_w = label_w + 40 + 480
+        list_x = (WIDTH - list_w) // 2
+        y = draw_vertical_file(screen, list_x, 20, self.stages_done,
+                               font=font, active_key=key) + 12
 
         # Question dots row (overall progress)
         dy = y
