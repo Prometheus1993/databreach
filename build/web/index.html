@@ -377,6 +377,65 @@ function show_infobox() {
             opacity: 0.4;
             z-index: 999 !important;
         }
+
+        /* ---------- session report overlay ---------- */
+        #report {
+            position: fixed; inset: 0;
+            background: rgba(0, 0, 0, 0.96);
+            color: #00e600;
+            font-family: "Courier New", Courier, monospace;
+            z-index: 10001;
+            display: none;
+            overflow-y: auto;
+            padding: 20px 28px 40px;
+        }
+        #report.show { display: block; }
+        #report h2 {
+            font-size: 20px; letter-spacing: 5px; margin: 0 0 4px;
+        }
+        #report .meta {
+            font-size: 11px; letter-spacing: 2px; opacity: 0.6;
+        }
+        #report header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 18px; gap: 20px;
+        }
+        #report .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+        }
+        #report .card {
+            border: 1px solid #003c00;
+            background: rgba(0, 30, 0, 0.25);
+            padding: 12px 14px;
+        }
+        #report .card.wide { grid-column: 1 / -1; }
+        #report .card h3 {
+            font-size: 12px; letter-spacing: 4px; margin: 0 0 10px;
+            color: #00e600; opacity: 0.85;
+        }
+        #report .kv {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            row-gap: 6px; column-gap: 14px;
+            font-size: 12px; letter-spacing: 1px;
+        }
+        #report .kv span:nth-child(odd) { opacity: 0.55; }
+        #report table { width: 100%; font-size: 12px; border-collapse: collapse; letter-spacing: 1px; }
+        #report table td { padding: 4px 6px; }
+        #report table td:first-child { opacity: 0.8; }
+        #report table td:nth-child(2) { text-align: right; width: 64px; }
+        #report table .bar {
+            position: relative;
+            height: 8px; background: #001500; border: 1px solid #003c00;
+        }
+        #report table .bar-fill { position: absolute; inset: 0 auto 0 0; background: #00e600; }
+        #report canvas.viz {
+            width: 100%; display: block; background: #000;
+            border: 1px solid #003c00;
+        }
+        #report footer { margin-top: 14px; display: flex; gap: 10px; justify-content: flex-end; }
     </style>
 
     <script>
@@ -482,7 +541,7 @@ frameborder="1"
         <button class="eye-btn" id="eye-dot" disabled>HIDE GAZE DOT</button>
         <button class="eye-btn" id="eye-heatmap" disabled>SHOW HEATMAP</button>
         <button class="eye-btn" id="eye-clear" disabled>CLEAR</button>
-        <button class="eye-btn" id="eye-export" disabled>EXPORT CSV</button>
+        <button class="eye-btn" id="eye-report" disabled>REPORT</button>
     </div>
 
     <canvas id="heatmap"></canvas>
@@ -495,6 +554,50 @@ frameborder="1"
             <small>CLICK EACH GREEN DOT 5× WHILE LOOKING AT IT</small>
         </div>
         <button class="eye-btn" id="calib-cancel">CANCEL</button>
+    </div>
+
+    <div id="report">
+        <header>
+            <div>
+                <h2>SESSION REPORT</h2>
+                <div class="meta" id="rp-meta">—</div>
+            </div>
+            <button class="eye-btn" id="report-close">CLOSE</button>
+        </header>
+        <div class="grid">
+            <section class="card">
+                <h3>STATS</h3>
+                <div class="kv">
+                    <span>Samples</span><span id="rp-samples">0</span>
+                    <span>Duration</span><span id="rp-duration">0</span>
+                    <span>Sampling rate</span><span id="rp-rate">0 Hz</span>
+                    <span>Fixations</span><span id="rp-fix">0</span>
+                    <span>Saccades</span><span id="rp-sac">0</span>
+                    <span>Avg fixation</span><span id="rp-avgfix">0 ms</span>
+                    <span>Longest fixation</span><span id="rp-maxfix">0 ms</span>
+                </div>
+            </section>
+            <section class="card">
+                <h3>AREAS OF INTEREST (% TIME)</h3>
+                <table id="rp-aoi"></table>
+            </section>
+            <section class="card wide">
+                <h3>HEATMAP — where eyes spent the most time</h3>
+                <canvas id="rp-heatmap" class="viz" width="1280" height="540"></canvas>
+            </section>
+            <section class="card wide">
+                <h3>SCANPATH — order of fixations (radius = duration)</h3>
+                <canvas id="rp-scanpath" class="viz" width="1280" height="540"></canvas>
+            </section>
+            <section class="card wide">
+                <h3>VERTICAL ATTENTION OVER TIME</h3>
+                <canvas id="rp-timeline" class="viz" width="1280" height="180"></canvas>
+            </section>
+        </div>
+        <footer>
+            <button class="eye-btn" id="report-csv">EXPORT CSV</button>
+            <button class="eye-btn" id="report-png">SAVE REPORT AS PNG</button>
+        </footer>
     </div>
 
     <script type="application/javascript">
@@ -538,10 +641,78 @@ frameborder="1"
         }
 
         // ---------- recording ----------
-        // each sample: { t: ms since session start, x, y, vw, vh }
+        // each sample: { t: ms since session start, x, y, vw, vh, aoi }
         const samples = [];
         let sessionStartMs = 0;
         let sessionStartIso = "";
+
+        // ---------- areas of interest (3x3 viewport grid + off-screen) ----------
+        const AOI_LABELS = [
+            "TOP-LEFT", "TOP-CENTER", "TOP-RIGHT",
+            "MID-LEFT", "CENTER",     "MID-RIGHT",
+            "BOT-LEFT", "BOT-CENTER", "BOT-RIGHT",
+            "OFF-SCREEN",
+        ];
+        const aoiCounts = Object.fromEntries(AOI_LABELS.map(l => [l, 0]));
+
+        function classifyAOI(x, y) {
+            const w = window.innerWidth, h = window.innerHeight;
+            if (x < 0 || y < 0 || x > w || y > h) return "OFF-SCREEN";
+            const col = x < w / 3 ? 0 : x < (2 * w) / 3 ? 1 : 2;
+            const row = y < h / 3 ? 0 : y < (2 * h) / 3 ? 1 : 2;
+            const rowName = ["TOP", "MID", "BOT"][row];
+            const colName = ["LEFT", "CENTER", "RIGHT"][col];
+            if (rowName === "MID" && colName === "CENTER") return "CENTER";
+            return `${rowName}-${colName}`;
+        }
+
+        // ---------- fixation detection (I-DT, dispersion threshold) ----------
+        const FIX_DISP_PX = 60;     // max bounding-box size for a fixation
+        const FIX_MIN_DUR_MS = 100; // shorter than this = noise, drop it
+        const fixations = []; // { x, y, duration, startMs, n }
+        let curFix = null;
+
+        function processFixation(x, y, t) {
+            if (!curFix) {
+                curFix = { sx: x, sy: y, n: 1, start: t, end: t,
+                           minX: x, maxX: x, minY: y, maxY: y };
+                return;
+            }
+            const minX = Math.min(curFix.minX, x);
+            const maxX = Math.max(curFix.maxX, x);
+            const minY = Math.min(curFix.minY, y);
+            const maxY = Math.max(curFix.maxY, y);
+            if (maxX - minX <= FIX_DISP_PX && maxY - minY <= FIX_DISP_PX) {
+                curFix.sx += x; curFix.sy += y; curFix.n++;
+                curFix.end = t;
+                curFix.minX = minX; curFix.maxX = maxX;
+                curFix.minY = minY; curFix.maxY = maxY;
+            } else {
+                finalizeFixation();
+                curFix = { sx: x, sy: y, n: 1, start: t, end: t,
+                           minX: x, maxX: x, minY: y, maxY: y };
+            }
+        }
+        function finalizeFixation() {
+            if (!curFix) return;
+            const dur = curFix.end - curFix.start;
+            if (dur >= FIX_MIN_DUR_MS) {
+                fixations.push({
+                    x: curFix.sx / curFix.n,
+                    y: curFix.sy / curFix.n,
+                    duration: dur,
+                    startMs: curFix.start,
+                    n: curFix.n,
+                });
+            }
+            curFix = null;
+        }
+
+        function resetAnalytics() {
+            for (const k of Object.keys(aoiCounts)) aoiCounts[k] = 0;
+            fixations.length = 0;
+            curFix = null;
+        }
 
         // ---------- gaze loop ----------
         const gazeDot = document.getElementById("gaze-dot");
@@ -578,12 +749,17 @@ frameborder="1"
 
             // record
             if (sessionStartMs) {
+                const tMs = Math.round(now - sessionStartMs);
+                const aoi = classifyAOI(x, y);
+                aoiCounts[aoi] = (aoiCounts[aoi] || 0) + 1;
+                processFixation(x, y, tMs);
                 samples.push({
-                    t: Math.round(now - sessionStartMs),
+                    t: tMs,
                     x: Math.round(x),
                     y: Math.round(y),
                     vw: window.innerWidth,
                     vh: window.innerHeight,
+                    aoi,
                 });
                 addHeatPoint(x, y);
                 updateStats(now);
@@ -596,9 +772,9 @@ frameborder="1"
                 alert("No samples recorded yet.");
                 return;
             }
-            const header = "session_start_iso,t_ms,x_px,y_px,viewport_w,viewport_h\n";
+            const header = "session_start_iso,t_ms,x_px,y_px,viewport_w,viewport_h,aoi\n";
             const rows = samples.map(s =>
-                `${sessionStartIso},${s.t},${s.x},${s.y},${s.vw},${s.vh}`
+                `${sessionStartIso},${s.t},${s.x},${s.y},${s.vw},${s.vh},${s.aoi || ""}`
             ).join("\n");
             const blob = new Blob([header + rows + "\n"], { type: "text/csv" });
             const url = URL.createObjectURL(blob);
@@ -610,6 +786,234 @@ frameborder="1"
             a.click();
             a.remove();
             setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+
+        // ---------- report rendering ----------
+        const reportEl = document.getElementById("report");
+        const rpHeatmap   = document.getElementById("rp-heatmap");
+        const rpScanpath  = document.getElementById("rp-scanpath");
+        const rpTimeline  = document.getElementById("rp-timeline");
+
+        function fitVizCanvas(canvas) {
+            // make the bitmap match the displayed CSS width to keep drawings sharp
+            const dispW = canvas.clientWidth || canvas.width;
+            const ratio = canvas.height / canvas.width; // preserve aspect
+            canvas.width  = Math.max(640, Math.round(dispW));
+            canvas.height = Math.round(canvas.width * ratio);
+        }
+
+        function renderReportHeatmap() {
+            fitVizCanvas(rpHeatmap);
+            const ctx = rpHeatmap.getContext("2d");
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, rpHeatmap.width, rpHeatmap.height);
+            // map viewport -> canvas
+            const sx = rpHeatmap.width / Math.max(1, window.innerWidth);
+            const sy = rpHeatmap.height / Math.max(1, window.innerHeight);
+            const r = 28;
+            ctx.globalCompositeOperation = "lighter";
+            for (const s of samples) {
+                const x = s.x * sx, y = s.y * sy;
+                const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+                grad.addColorStop(0.0, "rgba(255, 60, 0, 0.22)");
+                grad.addColorStop(0.5, "rgba(255, 200, 0, 0.07)");
+                grad.addColorStop(1.0, "rgba(0, 80, 255, 0.00)");
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.arc(x, y, r, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalCompositeOperation = "source-over";
+            // grid overlay (thirds)
+            ctx.strokeStyle = "rgba(0, 230, 0, 0.18)";
+            ctx.lineWidth = 1;
+            for (let i = 1; i < 3; i++) {
+                const gx = (i / 3) * rpHeatmap.width;
+                const gy = (i / 3) * rpHeatmap.height;
+                ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, rpHeatmap.height); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(rpHeatmap.width, gy); ctx.stroke();
+            }
+        }
+
+        function renderScanpath() {
+            fitVizCanvas(rpScanpath);
+            const ctx = rpScanpath.getContext("2d");
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, rpScanpath.width, rpScanpath.height);
+            const sx = rpScanpath.width / Math.max(1, window.innerWidth);
+            const sy = rpScanpath.height / Math.max(1, window.innerHeight);
+            // grid
+            ctx.strokeStyle = "rgba(0, 230, 0, 0.12)";
+            for (let i = 1; i < 3; i++) {
+                const gx = (i / 3) * rpScanpath.width;
+                const gy = (i / 3) * rpScanpath.height;
+                ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, rpScanpath.height); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(rpScanpath.width, gy); ctx.stroke();
+            }
+            const fixes = fixations;
+            if (fixes.length === 0) return;
+            // lines
+            ctx.strokeStyle = "rgba(0, 230, 0, 0.55)";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            for (let i = 0; i < fixes.length; i++) {
+                const f = fixes[i];
+                const px = f.x * sx, py = f.y * sy;
+                if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+            }
+            ctx.stroke();
+            // circles + labels
+            ctx.font = "11px 'Courier New', Courier, monospace";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            const maxDur = fixes.reduce((m, f) => Math.max(m, f.duration), 1);
+            for (let i = 0; i < fixes.length; i++) {
+                const f = fixes[i];
+                const px = f.x * sx, py = f.y * sy;
+                const r = 6 + 18 * Math.sqrt(f.duration / maxDur);
+                ctx.fillStyle = "rgba(0, 230, 0, 0.25)";
+                ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.fill();
+                ctx.strokeStyle = "rgba(0, 230, 0, 0.9)";
+                ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.stroke();
+                ctx.fillStyle = "#00e600";
+                ctx.fillText(String(i + 1), px, py);
+            }
+        }
+
+        function renderTimeline() {
+            fitVizCanvas(rpTimeline);
+            const ctx = rpTimeline.getContext("2d");
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, rpTimeline.width, rpTimeline.height);
+            if (samples.length < 2) return;
+            const tMax = samples[samples.length - 1].t || 1;
+            // y baseline at middle, screen-y up = high on chart
+            ctx.strokeStyle = "rgba(0, 230, 0, 0.2)";
+            ctx.beginPath();
+            ctx.moveTo(0, rpTimeline.height / 2);
+            ctx.lineTo(rpTimeline.width, rpTimeline.height / 2);
+            ctx.stroke();
+            ctx.strokeStyle = "rgba(0, 230, 0, 0.9)";
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            for (let i = 0; i < samples.length; i++) {
+                const s = samples[i];
+                const px = (s.t / tMax) * rpTimeline.width;
+                const py = (s.y / Math.max(1, s.vh)) * rpTimeline.height;
+                if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+            }
+            ctx.stroke();
+            // labels
+            ctx.fillStyle = "rgba(0, 230, 0, 0.7)";
+            ctx.font = "10px 'Courier New', Courier, monospace";
+            ctx.textAlign = "left";
+            ctx.fillText("TOP OF SCREEN", 6, 12);
+            ctx.fillText("BOTTOM OF SCREEN", 6, rpTimeline.height - 6);
+            ctx.textAlign = "right";
+            ctx.fillText(`+${(tMax / 1000).toFixed(1)}s`, rpTimeline.width - 6, 12);
+        }
+
+        function renderAoiTable() {
+            const total = Object.values(aoiCounts).reduce((a, b) => a + b, 0);
+            const rows = AOI_LABELS
+                .map(l => ({ label: l, n: aoiCounts[l] || 0 }))
+                .filter(r => r.n > 0)
+                .sort((a, b) => b.n - a.n);
+            const tbl = document.getElementById("rp-aoi");
+            if (total === 0 || rows.length === 0) {
+                tbl.innerHTML = `<tr><td colspan="3" style="opacity:.5">no samples yet</td></tr>`;
+                return;
+            }
+            tbl.innerHTML = rows.map(r => {
+                const pct = (r.n / total) * 100;
+                return `<tr>
+                    <td>${r.label}</td>
+                    <td>${pct.toFixed(1)}%</td>
+                    <td><div class="bar"><div class="bar-fill" style="width:${pct.toFixed(1)}%"></div></div></td>
+                </tr>`;
+            }).join("");
+        }
+
+        function renderReport() {
+            // make sure the in-progress fixation gets included
+            const snapshot = curFix;
+            finalizeFixation();
+            curFix = snapshot; // restore so live tracking continues uninterrupted
+
+            const elapsedMs = sessionStartMs ? performance.now() - sessionStartMs : 0;
+            const hz = elapsedMs > 0 ? (samples.length / (elapsedMs / 1000)) : 0;
+            const fixDurations = fixations.map(f => f.duration);
+            const avgFix = fixDurations.length
+                ? fixDurations.reduce((a, b) => a + b, 0) / fixDurations.length : 0;
+            const maxFix = fixDurations.length ? Math.max(...fixDurations) : 0;
+
+            document.getElementById("rp-meta").textContent =
+                `START ${sessionStartIso || "—"}  ·  VIEWPORT ${window.innerWidth}×${window.innerHeight}`;
+            document.getElementById("rp-samples").textContent  = samples.length;
+            document.getElementById("rp-duration").textContent = fmtElapsed(elapsedMs);
+            document.getElementById("rp-rate").textContent     = `${hz.toFixed(1)} Hz`;
+            document.getElementById("rp-fix").textContent      = fixations.length;
+            document.getElementById("rp-sac").textContent      = Math.max(0, fixations.length - 1);
+            document.getElementById("rp-avgfix").textContent   = `${Math.round(avgFix)} ms`;
+            document.getElementById("rp-maxfix").textContent   = `${Math.round(maxFix)} ms`;
+
+            renderAoiTable();
+            // wait one frame so canvases have layout (clientWidth)
+            requestAnimationFrame(() => {
+                renderReportHeatmap();
+                renderScanpath();
+                renderTimeline();
+            });
+        }
+
+        function openReport() {
+            reportEl.classList.add("show");
+            renderReport();
+        }
+        function closeReport() { reportEl.classList.remove("show"); }
+
+        async function saveReportAsPNG() {
+            // stitch the three viz canvases + a header into one PNG
+            const pad = 24, gap = 20, headerH = 70;
+            const W = Math.max(rpHeatmap.width, rpScanpath.width, rpTimeline.width) + pad * 2;
+            const H = headerH + rpHeatmap.height + rpScanpath.height + rpTimeline.height
+                    + gap * 4 + pad * 2;
+            const out = document.createElement("canvas");
+            out.width = W; out.height = H;
+            const c = out.getContext("2d");
+            c.fillStyle = "#000"; c.fillRect(0, 0, W, H);
+            c.fillStyle = "#00e600";
+            c.font = "bold 22px 'Courier New', Courier, monospace";
+            c.fillText("DATA BREACH — SESSION REPORT", pad, pad + 22);
+            c.font = "12px 'Courier New', Courier, monospace";
+            c.fillStyle = "rgba(0, 230, 0, 0.6)";
+            const elapsedMs = sessionStartMs ? performance.now() - sessionStartMs : 0;
+            c.fillText(
+                `${sessionStartIso}  ·  ${samples.length} samples  ·  ${fmtElapsed(elapsedMs)}  ·  ${fixations.length} fixations`,
+                pad, pad + 44
+            );
+            let y = headerH + pad;
+            const drawSection = (title, src) => {
+                c.fillStyle = "rgba(0, 230, 0, 0.85)";
+                c.font = "bold 13px 'Courier New', Courier, monospace";
+                c.fillText(title, pad, y - 6);
+                c.drawImage(src, pad, y, src.width, src.height);
+                y += src.height + gap;
+            };
+            drawSection("HEATMAP", rpHeatmap);
+            drawSection("SCANPATH", rpScanpath);
+            drawSection("VERTICAL ATTENTION OVER TIME", rpTimeline);
+
+            const stamp = (sessionStartIso || new Date().toISOString()).replace(/[:.]/g, "-");
+            out.toBlob((blob) => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `databreach_report_${stamp}.png`;
+                document.body.appendChild(a);
+                a.click(); a.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+            }, "image/png");
         }
 
         // calibration
@@ -659,7 +1063,7 @@ frameborder="1"
         const dotBtn     = document.getElementById("eye-dot");
         const heatmapBtn = document.getElementById("eye-heatmap");
         const clearBtn   = document.getElementById("eye-clear");
-        const exportBtn  = document.getElementById("eye-export");
+        const reportBtn  = document.getElementById("eye-report");
 
         let webgazerReady = false;
         let webgazerOn = false;
@@ -669,7 +1073,7 @@ frameborder="1"
             dotBtn.disabled = !on;
             heatmapBtn.disabled = !on;
             clearBtn.disabled = !on;
-            exportBtn.disabled = !on;
+            reportBtn.disabled = !on;
         }
 
         async function startWebgazer() {
@@ -771,11 +1175,19 @@ frameborder="1"
             if (!confirm("Clear all recorded gaze data?")) return;
             samples.length = 0;
             clearHeatmap();
+            resetAnalytics();
             sessionStartMs = performance.now();
             sessionStartIso = new Date().toISOString();
             updateStats(performance.now());
         });
-        exportBtn.addEventListener("click", exportCSV);
+        reportBtn.addEventListener("click", openReport);
+        document.getElementById("report-close").addEventListener("click", closeReport);
+        document.getElementById("report-csv").addEventListener("click", exportCSV);
+        document.getElementById("report-png").addEventListener("click", saveReportAsPNG);
+        // close report on Escape
+        document.addEventListener("keydown", (e) => {
+            if (e.key === "Escape" && reportEl.classList.contains("show")) closeReport();
+        });
 
         // preload webgazer in the background
         (function loadWebgazer() {
