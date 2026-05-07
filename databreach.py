@@ -1554,36 +1554,50 @@ class Game:
         draw_text(screen, "[ NEW MISSION ]", 20, 14, FONT_MD, GREEN)
 
         # Big headline
-        draw_text_centered(screen, "REDACTED FILE INCOMING", 60, FONT_XL, CYAN_BRIGHT)
+        draw_text_centered(screen, "REDACTED FILE INCOMING", 70, FONT_XL, CYAN_BRIGHT)
 
-        # The redacted file, big and centered
-        file_font = FONT_MD
-        lh = file_font.get_linesize() + 2
-        total_lines = len(FILE_HEADER) + len(FILE_REDACTED) + 2  # + footer-sep + bottom
-        file_w = file_font.size(FILE_HEADER[0])[0]
-        file_x = (WIDTH - file_w) // 2
-        file_y = 150
-        row_y = file_y
-        for line in FILE_HEADER:
-            draw_text(screen, line, file_x, row_y, file_font, GREEN)
-            row_y += lh
-        for i in range(len(FILE_REDACTED)):
-            draw_text(screen, FILE_REDACTED[i], file_x, row_y, file_font, GREEN_DIM)
-            row_y += lh
-        draw_text(screen, FILE_FOOTER_SEP, file_x, row_y, file_font, GREEN)
-        row_y += lh
-        draw_text(screen, FILE_BOTTOM, file_x, row_y, file_font, GREEN)
-        row_y += lh
+        # Vertical list of fields — one per line, easy to scan.
+        FIELDS = [
+            "TARGET", "LOCATION", "CODE",
+            "DATE", "TIME", "OPERATIVE",
+            "METHOD", "FUNDING", "SOURCE", "CONTACT",
+        ]
+        label_font = FONT_LG
+        value_font = FONT_LG
+        # widest label decides the colon-column
+        label_w = max(label_font.size(f)[0] for f in FIELDS)
+        rows_y = 170
+        row_h = label_font.get_linesize() + 8
+        list_w = label_w + 40 + 360  # label gutter + redacted bar
+        list_x = (WIDTH - list_w) // 2
 
-        # Mission instruction
-        instr_y = row_y + 30
+        for i, fld in enumerate(FIELDS):
+            ry = rows_y + i * row_h
+            # label
+            label_surf = label_font.render(fld, True, GREEN_DIM)
+            screen.blit(label_surf, (list_x, ry))
+            # colon
+            colon = label_font.render(":", True, GREEN_DIM)
+            screen.blit(colon, (list_x + label_w + 8, ry))
+            # redacted bar (faded blocks)
+            bar_x = list_x + label_w + 40
+            bar_w = 360
+            bar_h = label_font.get_height() - 6
+            pygame.draw.rect(screen, (0, 40, 0),
+                             (bar_x, ry + 3, bar_w, bar_h))
+            # decorative "█" pattern (just a checker so it reads as redacted)
+            block = label_font.render("█" * 12, True, GREEN_DIM)
+            screen.blit(block, (bar_x + 6, ry))
+
+        # Mission instruction below the list
+        instr_y = rows_y + len(FIELDS) * row_h + 30
         draw_text_centered(screen, "Unredact this file by completing 3 challenges.",
                            instr_y, FONT_LG, YELLOW)
 
         # Press to begin (blinking)
         if int(self.brief_t * 2) % 2 == 0:
             draw_text_centered(screen, ">>> PRESS ENTER TO BEGIN <<<",
-                               HEIGHT - 70, FONT_LG, GREEN_BRIGHT)
+                               HEIGHT - 60, FONT_LG, GREEN_BRIGHT)
 
     # -- TRANSITION -------------------------------------------------------
     def _get_transition_instructions(self):
@@ -1630,6 +1644,74 @@ class Game:
                 ("ARROWS switch slot · letters/numbers to type · ENTER submit", GREEN_DIM),
             ]
         return self.trans_label, []
+
+    def _draw_connect_preview(self, x, y, w, h):
+        """Tiny mockup of the node-link minigame so players see the goal."""
+        title = FONT_MD.render("HOW NODE LINK WORKS", True, CYAN)
+        screen.blit(title, (x + (w - title.get_width()) // 2, y))
+        ty = y + title.get_height() + 14
+
+        # Two-column layout: left = mini board, right = explanatory text
+        left_w = 260
+        board_x = x + 30
+        board_y = ty
+        # Draw a small grid background
+        cell = 36
+        cols, rows = left_w // cell, (h - title.get_height() - 30) // cell
+        cols = max(5, cols)
+        rows = max(4, rows)
+        for r in range(rows):
+            for c in range(cols):
+                cx = board_x + c * cell
+                cy = board_y + r * cell
+                pygame.draw.rect(screen, (5, 35, 25), (cx, cy, cell, cell))
+                pygame.draw.rect(screen, (0, 60, 0), (cx, cy, cell, cell), 1)
+
+        # Place 4 numbered nodes
+        nodes = [(0, 1), (3, 0), (4, 3), (1, 3)]  # (col, row)
+        nodes_xy = [(board_x + c * cell + cell // 2,
+                     board_y + r * cell + cell // 2) for c, r in nodes]
+
+        # Draw a sample trail 1 → 2 (right-angle path) so players see the rule
+        trail = [
+            nodes_xy[0],
+            (nodes_xy[1][0], nodes_xy[0][1]),
+            nodes_xy[1],
+        ]
+        if len(trail) >= 2:
+            pygame.draw.lines(screen, GREEN_BRIGHT, False, trail, 4)
+
+        # Obstacle (red square) somewhere mid-board
+        ob_c, ob_r = 2, 2
+        ob_x = board_x + ob_c * cell + 4
+        ob_y = board_y + ob_r * cell + 4
+        pygame.draw.rect(screen, RED, (ob_x, ob_y, cell - 8, cell - 8))
+
+        # Numbered nodes on top
+        for idx, (px, py) in enumerate(nodes_xy):
+            r = 14
+            color = CYAN_BRIGHT if idx < 2 else GREEN
+            pygame.draw.circle(screen, color, (px, py), r)
+            pygame.draw.circle(screen, BLACK, (px, py), r - 4)
+            num = FONT_SM.render(str(idx + 1), True, color)
+            screen.blit(num, (px - num.get_width() // 2, py - num.get_height() // 2))
+
+        # Right column — bullet explanations
+        text_x = board_x + left_w + 30
+        text_y = ty
+        bullets = [
+            ("1", "Walk from node 1 to node 2 to 3 to 4 IN ORDER", GREEN_BRIGHT),
+            ("2", "Use ARROW KEYS — only up/down/left/right", GREEN),
+            ("3", "Avoid red obstacles", RED_BRIGHT),
+            ("4", "Don't cross your own trail", YELLOW),
+        ]
+        for num, text, color in bullets:
+            pygame.draw.circle(screen, color, (text_x + 12, text_y + FONT_MD.get_height() // 2 + 2), 12)
+            num_s = FONT_SM.render(num, True, BLACK)
+            screen.blit(num_s, (text_x + 12 - num_s.get_width() // 2,
+                                text_y + FONT_MD.get_height() // 2 + 2 - num_s.get_height() // 2))
+            draw_text(screen, text, text_x + 34, text_y, FONT_MD, color)
+            text_y += FONT_MD.get_linesize() + 6
 
     def _draw_maze_legend(self, x, y, w):
         """Quick visual legend explaining the icons used in the maze."""
@@ -1852,15 +1934,24 @@ class Game:
             draw_text_centered(screen, text, y, font, color or GREEN)
             y += font.get_linesize() + 4
 
-        # On the FIRST minigame (roulette), drop in a maze legend so players
-        # know what they'll see in protocol 2.
-        if self.trans_next == "roulette" and len(self.stages_done) == 0:
-            legend_w = 640
+        # Maze icon legend — shown on the loading screen INTO the maze
+        # (after roulette is done) so players recognise what they'll see.
+        if self.trans_next == "maze":
+            legend_w = 720
             legend_x = (WIDTH - legend_w) // 2
             legend_y = y + 20
             pygame.draw.rect(screen, GREEN_DIM,
-                             (legend_x - 10, legend_y - 10, legend_w + 20, 220), 1)
+                             (legend_x - 10, legend_y - 10, legend_w + 20, 240), 1)
             self._draw_maze_legend(legend_x, legend_y, legend_w)
+        # Connect mini-preview — shown on the loading screen INTO the
+        # connect minigame so players understand the goal at a glance.
+        elif self.trans_next == "connect":
+            preview_w = 720
+            preview_x = (WIDTH - preview_w) // 2
+            preview_y = y + 20
+            pygame.draw.rect(screen, GREEN_DIM,
+                             (preview_x - 10, preview_y - 10, preview_w + 20, 240), 1)
+            self._draw_connect_preview(preview_x, preview_y, preview_w, 220)
 
         # Bottom: prompt
         if self.trans_ready:
@@ -2744,10 +2835,10 @@ class Game:
         if self.cn_warning_timer > 0:
             draw_text_centered(screen, self.cn_warning, HEIGHT - 180, FONT_SM, RED_BRIGHT)
 
-    # -- INTEL (inline file typing) ---------------------------------------
+    # -- INTEL (confirm if unlocked, multiple choice if locked) -----------
     def _init_intel(self, restore=False):
         self.intel_cursor = 0
-        self.intel_typed   = ["" for _ in DEBRIEF_QUESTIONS]
+        self.intel_choice_cursor = 0
         self.intel_answers = [None] * len(DEBRIEF_QUESTIONS)
         self.intel_attempts = [self.diff["intel_attempts"]] * len(DEBRIEF_QUESTIONS)
         self.intel_correct = 0
@@ -2755,10 +2846,19 @@ class Game:
         self.intel_feedback_color = GREEN
         self.intel_feedback_timer = 0.0
 
-        # Pre-fill UNLOCKED slots with the correct answer (player just confirms).
-        for i, (_label, key) in enumerate(DEBRIEF_QUESTIONS):
+        # For each question: build either a 4-option choice list (locked
+        # stage — player must guess) or None (unlocked — just confirm).
+        self.intel_choices = []
+        for _label, key in DEBRIEF_QUESTIONS:
             if QUESTION_STAGE.get(key) in self.stages_done:
-                self.intel_typed[i] = INTEL[key].upper()
+                self.intel_choices.append(None)
+            else:
+                correct = INTEL[key]
+                pool = [v for v in INTEL_POOL[key] if v != correct]
+                wrongs = random.sample(pool, min(3, len(pool)))
+                options = wrongs + [correct]
+                random.shuffle(options)
+                self.intel_choices.append(options)
 
         self._intel_skip_done()
 
@@ -2770,7 +2870,9 @@ class Game:
                 self.intel_attempts[self.intel_cursor] <= 0):
                 self.intel_cursor = (self.intel_cursor + 1) % n
             else:
+                self.intel_choice_cursor = 0
                 return
+        self.intel_choice_cursor = 0
 
     def _intel_next_unresolved(self):
         n = len(DEBRIEF_QUESTIONS)
@@ -2778,18 +2880,23 @@ class Game:
             idx = (self.intel_cursor + off) % n
             if self.intel_answers[idx] is None and self.intel_attempts[idx] > 0:
                 self.intel_cursor = idx
+                self.intel_choice_cursor = 0
                 return
 
     def _intel_submit(self):
         i = self.intel_cursor
-        typed = self.intel_typed[i].strip()
-        if not typed:
-            return
         key = DEBRIEF_QUESTIONS[i][1]
-        correct = INTEL[key].strip()
-        if typed.upper() == correct.upper():
+        choices = self.intel_choices[i]
+        correct = INTEL[key]
+
+        if choices is None:
+            # Unlocked — auto-confirm.
+            picked = correct
+        else:
+            picked = choices[self.intel_choice_cursor]
+
+        if picked == correct:
             self.intel_answers[i] = correct
-            self.intel_typed[i] = correct.upper()
             self.intel_correct += 1
             self.intel_feedback = "CORRECT"
             self.intel_feedback_color = CYAN_BRIGHT
@@ -2799,10 +2906,14 @@ class Game:
         else:
             self.intel_attempts[i] -= 1
             if self.intel_attempts[i] <= 0:
-                self.intel_feedback = f"OUT OF TRIES — was {correct.upper()}"
+                self.intel_feedback = f"OUT OF TRIES — answer was {correct}"
                 self.intel_feedback_color = RED_BRIGHT
+                self._intel_next_unresolved()
             else:
-                self.intel_feedback = f"WRONG — {self.intel_attempts[i]} {'try' if self.intel_attempts[i] == 1 else 'tries'} left"
+                self.intel_feedback = (
+                    f"WRONG — {self.intel_attempts[i]} "
+                    f"{'try' if self.intel_attempts[i] == 1 else 'tries'} left"
+                )
                 self.intel_feedback_color = RED
             self.flash_timer = 0.18
             self.flash_color = RED
@@ -2828,24 +2939,24 @@ class Game:
             i = self.intel_cursor
             resolved = (self.intel_answers[i] is not None or
                         self.intel_attempts[i] <= 0)
+            choices = self.intel_choices[i]
 
-            if e.key in (pygame.K_LEFT, pygame.K_UP):
+            if e.key == pygame.K_LEFT:
                 self.intel_cursor = (i - 1) % n
+                self.intel_choice_cursor = 0
                 self.intel_feedback_timer = 0
-            elif e.key in (pygame.K_RIGHT, pygame.K_DOWN):
+            elif e.key == pygame.K_RIGHT:
                 self.intel_cursor = (i + 1) % n
+                self.intel_choice_cursor = 0
                 self.intel_feedback_timer = 0
             elif resolved:
-                # Resolved slots only allow navigation
                 continue
-            elif e.key == pygame.K_BACKSPACE:
-                self.intel_typed[i] = self.intel_typed[i][:-1]
-            elif e.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            elif e.key == pygame.K_UP and choices is not None:
+                self.intel_choice_cursor = (self.intel_choice_cursor - 1) % len(choices)
+            elif e.key == pygame.K_DOWN and choices is not None:
+                self.intel_choice_cursor = (self.intel_choice_cursor + 1) % len(choices)
+            elif e.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
                 self._intel_submit()
-            elif e.unicode and len(self.intel_typed[i]) < 24:
-                ch = e.unicode
-                if ch.isalnum() or ch in "-' :.,/$":
-                    self.intel_typed[i] += ch.upper()
 
     def _finish_intel(self):
         self.state = "debrief"
@@ -2929,67 +3040,66 @@ class Game:
             dot_x += 60
         y = dy + FONT_SM.get_linesize() + 16
 
-        # Big input area
-        prompt = f"TYPE THE  {label}"
+        # Question label
+        prompt = label
         draw_text_centered(screen, prompt, y, FONT_LG, YELLOW)
         y += FONT_LG.get_linesize() + 8
 
         # Hint line
+        choices = self.intel_choices[i]
         if ans is not None:
             hint = "✓ CORRECT — confirmed"
             hint_color = CYAN_BRIGHT
         elif att <= 0:
-            hint = f"✗ FAILED — answer was: {INTEL[key].upper()}"
+            hint = f"✗ FAILED — answer was: {INTEL[key]}"
             hint_color = RED_BRIGHT
-        elif unlocked:
-            hint = "UNLOCKED — answer is shown above. Press ENTER to confirm."
+        elif choices is None:
+            hint = "UNLOCKED — press ENTER to confirm the answer above"
             hint_color = CYAN
         else:
-            hint = f"Tries left: {att}   ·   Type your answer, then ENTER"
+            hint = f"Tries left: {att}   ·   UP/DN  pick   ·   ENTER  submit"
             hint_color = GREEN_DIM
         draw_text_centered(screen, hint, y, FONT_MD, hint_color)
         y += FONT_MD.get_linesize() + 14
 
-        # Input box
-        box_w = 760
-        box_h = FONT_LG.get_linesize() + 24
-        box_x = (WIDTH - box_w) // 2
-        if ans is not None:
-            border = CYAN_BRIGHT
-        elif att <= 0:
-            border = RED_BRIGHT
-        elif unlocked:
-            border = CYAN
+        if choices is None:
+            # Unlocked — show the answer big with a CONFIRM box
+            box_w = 760
+            box_h = FONT_LG.get_linesize() + 24
+            box_x = (WIDTH - box_w) // 2
+            border = CYAN_BRIGHT if ans is None else CYAN
+            pygame.draw.rect(screen, (0, 20, 20), (box_x, y, box_w, box_h))
+            pygame.draw.rect(screen, border, (box_x, y, box_w, box_h), 2)
+            disp = INTEL[key]
+            ts = FONT_LG.render(disp, True, CYAN_BRIGHT)
+            screen.blit(ts, (box_x + (box_w - ts.get_width()) // 2,
+                             y + (box_h - ts.get_height()) // 2))
+            y += box_h + 14
         else:
-            border = GREEN_BRIGHT
-        pygame.draw.rect(screen, (0, 20, 0), (box_x, y, box_w, box_h))
-        pygame.draw.rect(screen, border, (box_x, y, box_w, box_h), 2)
-        typed = self.intel_typed[i]
-        if ans is not None:
-            disp = ans.upper()
-            disp_color = CYAN_BRIGHT
-        elif att <= 0:
-            disp = INTEL[key].upper()
-            disp_color = RED_BRIGHT
-        else:
-            disp = typed
-            disp_color = WHITE if not unlocked else CYAN
-        ts = FONT_LG.render(disp, True, disp_color)
-        screen.blit(ts, (box_x + 16, y + (box_h - ts.get_height()) // 2))
-        # blinking cursor when active
-        if ans is None and att > 0 and int(time.time() * 2) % 2 == 0:
-            cx = box_x + 16 + ts.get_width() + 2
-            cy0 = y + 8
-            cy1 = y + box_h - 8
-            pygame.draw.line(screen, border, (cx, cy0), (cx, cy1), 2)
-        y += box_h + 14
+            # Locked — multiple choice
+            letters = "ABCD"
+            for ci, option in enumerate(choices):
+                is_sel = (ci == self.intel_choice_cursor)
+                if ans is not None:
+                    color = CYAN if option == INTEL[key] else GREEN_DIM
+                elif att <= 0:
+                    color = RED_BRIGHT if option == INTEL[key] else GREEN_DIM
+                elif is_sel:
+                    color = WHITE
+                else:
+                    color = GREEN
+                marker = ">" if is_sel and ans is None and att > 0 else " "
+                line = f"{marker} [{letters[ci]}]  {option}"
+                draw_text_centered(screen, line, y, FONT_MD, color)
+                y += FONT_MD.get_linesize() + 4
+            y += 10
 
         # Feedback flash
         if self.intel_feedback_timer > 0 and self.intel_feedback:
             draw_text_centered(screen, self.intel_feedback, y, FONT_MD, self.intel_feedback_color)
 
         # Bottom controls hint
-        controls = "ARROWS  switch slot   ·   letters/numbers  type   ·   BACKSPACE  delete   ·   ENTER  submit"
+        controls = "LEFT/RIGHT  switch slot   ·   UP/DN  pick option   ·   ENTER  submit"
         draw_text_centered(screen, controls, HEIGHT - 32, FONT_SM, GREEN_DIM)
 
     # -- DEBRIEF ----------------------------------------------------------
