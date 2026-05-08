@@ -451,8 +451,11 @@ SCANLINES = create_scanlines()
 VIGNETTE = create_vignette()
 
 def apply_crt(surface):
-    surface.blit(SCANLINES, (0, 0))
-    surface.blit(VIGNETTE, (0, 0))
+    # Disabled — over noVNC the SCANLINES surface modulates every visible
+    # pixel each frame, which forces the VNC encoder to re-diff the entire
+    # framebuffer every tick. The retro CRT look is a free upgrade locally
+    # but a measurable bandwidth/latency cost when streaming.
+    return
 
 
 # --- MATRIX RAIN -------------------------------------------------------------
