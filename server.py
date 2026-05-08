@@ -155,8 +155,11 @@ def _start_services():
             '-nocursor',
             '-threads',
             '-ncache', '0',
-            '-wait', '5',
-            '-defer', '5',
+            # Scan/defer kept loose (~30 Hz) so we don't burn CPU encoding
+            # every tiny pixel diff from the matrix rain / CRT scanlines —
+            # the game still feels responsive but bandwidth stays tame.
+            '-wait', '30',
+            '-defer', '30',
         ],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )

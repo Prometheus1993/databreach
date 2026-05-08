@@ -720,41 +720,39 @@ def draw_sidebar(surface, remaining, total, stages_completed,
 
 
 def draw_urgency_overlay(surface, remaining):
-    """Subtle screen-wide urgency tint:
-    ≤30s — soft yellow vignette
-    ≤10s — gentle red flicker
-    Kept low-alpha so it conveys urgency without getting in the way."""
+    """Border-only urgency tint — no full-screen alpha so we don't churn
+    every pixel each frame (rough on noVNC bandwidth and CPU).
+
+    The sidebar timer already pulses colour for urgency; this just adds
+    a thin coloured border around the screen as an extra peripheral cue.
+
+    ≤30s, >10s — static yellow border
+    ≤10s       — slow red blink (1 Hz, two states only)
+    """
     if remaining > 30:
         return
+
     if remaining > 10:
-        # Yellow vignette: stronger at edges, faint in the middle.
-        pulse = int((math.sin(time.time() * 2.2) + 1) * 8) + 12  # 12..28
-        cache_key = ("urgency_yellow", pulse)
+        cache_key = "urgency_yellow"
+        color = (240, 200, 0, 60)
     else:
-        # Red flicker: gentle pulsing alpha, never spikes too high.
-        bright = (math.sin(time.time() * 6.0) + 1) * 0.5  # 0..1
-        a = int(20 + bright * 28)  # 20..48
-        cache_key = ("urgency_red", a)
+        # Two-state 1Hz blink — only one frame change per second, not per
+        # frame, so VNC barely notices.
+        if int(time.time() * 2) % 2:
+            return
+        cache_key = "urgency_red"
+        color = (220, 20, 20, 90)
 
     cache = draw_urgency_overlay._cache
     overlay = cache.get(cache_key)
     if overlay is None:
         overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-        cx, cy = WIDTH // 2, HEIGHT // 2
-        max_d = math.hypot(cx, cy)
-        if cache_key[0] == "urgency_yellow":
-            base = (240, 200, 0)
-            alpha_max = cache_key[1]
-            for r in range(int(max_d), 0, -8):
-                t = r / max_d
-                a = int(alpha_max * (t ** 2))
-                pygame.draw.circle(overlay, (*base, a), (cx, cy), r)
-        else:
-            overlay.fill((220, 20, 20, cache_key[1]))
+        edge = 18
+        pygame.draw.rect(overlay, color, (0, 0, WIDTH, edge))
+        pygame.draw.rect(overlay, color, (0, HEIGHT - edge, WIDTH, edge))
+        pygame.draw.rect(overlay, color, (0, 0, edge, HEIGHT))
+        pygame.draw.rect(overlay, color, (WIDTH - edge, 0, edge, HEIGHT))
         cache[cache_key] = overlay
-        if len(cache) > 64:
-            cache.clear()
-            cache[cache_key] = overlay
     surface.blit(overlay, (0, 0))
 
 draw_urgency_overlay._cache = {}
