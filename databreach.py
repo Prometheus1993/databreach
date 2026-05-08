@@ -1869,7 +1869,8 @@ class Game:
         return y + pill_h
 
     def _draw_connect_preview(self, x, y, w, h):
-        """Animated mini node-link board so players see the goal."""
+        """Animated mini node-link board: trail walks 1→2→through-gate→3,
+        the gate flashes cyan when passed, and node 3 unlocks behind it."""
         title = FONT_MD.render("HOW NODE LINK WORKS", True, CYAN)
         screen.blit(title, (x + (w - title.get_width()) // 2, y))
         ty = y + title.get_height() + 14
@@ -1887,22 +1888,56 @@ class Game:
                 pygame.draw.rect(screen, (5, 35, 25), (cx, cy, cell, cell))
                 pygame.draw.rect(screen, (0, 60, 0), (cx, cy, cell, cell), 1)
 
-        # 4 nodes — same positions every load so muscle memory builds
-        nodes = [(0, 1), (3, 0), (4, 3), (1, 3)]
+        # 3 nodes, in order. Node 3 sits behind a gate.
+        nodes = [(0, 1), (3, 1), (4, 3)]
         nodes_xy = [(board_x + c * cell + cell // 2,
                      board_y + r * cell + cell // 2) for c, r in nodes]
-        # Sample trail 1→2 (right-angle path) drawn progressively
-        trail_full = [nodes_xy[0],
-                      (nodes_xy[1][0], nodes_xy[0][1]),
-                      nodes_xy[1]]
-        # Total path length
+
+        # A gate (two yellow bars with a small vertical gap) sits between
+        # node 2 and node 3. The trail's last leg passes through the gap.
+        gate_cx = board_x + int(3.5 * cell)
+        gate_top_y = board_y + int(1.5 * cell)
+        gate_gap_h = 26
+        bar_w = 12
+        bar_h = 38
+        gate_top_rect = (gate_cx - bar_w // 2, gate_top_y, bar_w, bar_h)
+        gate_bot_rect = (gate_cx - bar_w // 2, gate_top_y + bar_h + gate_gap_h,
+                         bar_w, bar_h)
+        gate_gap_center = (gate_cx, gate_top_y + bar_h + gate_gap_h // 2)
+
+        # Build the full trail: n1 → n2 → gate → n3 (right-angle path).
+        trail_full = [
+            nodes_xy[0],
+            (nodes_xy[1][0], nodes_xy[0][1]),  # corner
+            nodes_xy[1],                        # node 2
+            (gate_gap_center[0], nodes_xy[1][1]),
+            gate_gap_center,                    # threading the gate
+            (gate_gap_center[0], nodes_xy[2][1]),
+            nodes_xy[2],                        # node 3
+        ]
         seg_lens = [math.hypot(trail_full[i+1][0]-trail_full[i][0],
                                trail_full[i+1][1]-trail_full[i][1])
                     for i in range(len(trail_full)-1)]
         total_len = sum(seg_lens)
-        cycle = (self.trans_timer * 90.0) % (total_len + 60)
+        # Cycle length includes a 1.5 s pause at the end so players can read.
+        speed = 80.0  # px / sec
+        cycle_total = total_len + speed * 1.5
+        cycle = (self.trans_timer * speed) % cycle_total
+        progress = min(cycle, total_len)
+
+        # How far through? Compute cumulative distance to find which beat
+        # we're on so we can light up gate / nodes at the right moments.
+        cum = [0.0]
+        for s in seg_lens:
+            cum.append(cum[-1] + s)
+        # The trail enters the gate gap at trail_full index 4 (the gap center).
+        gate_entered = progress >= cum[4] - 4
+        # Node 3 lights up once the player reaches the last point.
+        node3_lit = progress >= total_len - 2
+
+        # Render the drawn portion of the trail.
         drawn = []
-        remaining = min(cycle, total_len)
+        remaining = progress
         for i, seg in enumerate(seg_lens):
             if remaining <= 0:
                 break
@@ -1920,34 +1955,53 @@ class Game:
             pygame.draw.lines(screen, GREEN_BRIGHT, False,
                               [(int(p[0]), int(p[1])) for p in drawn], 4)
 
-        # Obstacle
-        ob_c, ob_r = 2, 2
+        # Obstacle (red square) somewhere off the trail
+        ob_c, ob_r = 1, 2
         ob_x = board_x + ob_c * cell + 4
         ob_y = board_y + ob_r * cell + 4
         pygame.draw.rect(screen, RED, (ob_x, ob_y, cell - 8, cell - 8))
 
+        # Gate — yellow while locked, cyan once the trail has threaded through.
+        gate_color = CYAN if gate_entered else YELLOW
+        gate_border = CYAN_BRIGHT if gate_entered else (180, 180, 0)
+        for rect in (gate_top_rect, gate_bot_rect):
+            pygame.draw.rect(screen, gate_color, rect)
+            pygame.draw.rect(screen, gate_border, rect, 1)
+        # "3" label inside the gap so players see the gate maps to node 3.
+        gx, gy = gate_gap_center
+        pygame.draw.circle(screen, gate_color, (gx, gy), 9)
+        lbl = FONT_SM.render("3", True, BLACK)
+        screen.blit(lbl, (gx - lbl.get_width() // 2, gy - lbl.get_height() // 2))
+
         # Numbered nodes
         for idx, (px, py) in enumerate(nodes_xy):
             r = 13
-            connected = cycle >= total_len * (idx / max(1, len(nodes_xy) - 1))
-            color = CYAN_BRIGHT if connected and idx <= 1 else (
-                GREEN_BRIGHT if idx == 1 else GREEN if idx > 1 else CYAN_BRIGHT)
+            if idx == 0:
+                color = CYAN_BRIGHT
+            elif idx == 1:
+                color = CYAN_BRIGHT if progress >= cum[2] else GREEN_BRIGHT
+            else:  # node 3 — locked behind the gate
+                if node3_lit:
+                    color = CYAN_BRIGHT
+                elif gate_entered:
+                    color = YELLOW  # unlocked but not yet reached
+                else:
+                    color = RED  # still locked
             pygame.draw.circle(screen, color, (px, py), r)
             pygame.draw.circle(screen, BLACK, (px, py), r - 4)
-            num = FONT_SM.render(str(idx + 1), True, color)
+            label = "X" if (idx == 2 and not gate_entered) else str(idx + 1)
+            num = FONT_SM.render(label, True, color)
             screen.blit(num, (px - num.get_width() // 2, py - num.get_height() // 2))
 
         # Right-column rules
         text_x = board_x + left_w + 30
         diff = self.diff
         bullets = [
-            ("1", "Walk from node 1 → 2 → 3 → … IN ORDER.", GREEN_BRIGHT),
-            ("2", "ARROW KEYS to move.", GREEN),
-            ("3", "Avoid RED obstacles.", RED_BRIGHT),
-            ("4", "Don't cross your own trail.", YELLOW),
+            ("1", "Walk node 1 → 2 → 3 IN ORDER.", GREEN_BRIGHT),
+            ("2", "Locked nodes show a RED X — pass the matching gate first.", RED_BRIGHT),
+            ("3", "Threading the gate's gap turns it CYAN and unlocks the node.", CYAN_BRIGHT),
+            ("4", "ARROW KEYS to move. Don't cross your own trail.", YELLOW),
         ]
-        if diff.get("num_gates", 0) > 0:
-            bullets.append(("5", "Pass through YELLOW GATES to unlock the matching node.", CYAN))
         self._draw_preview_bullets(text_x, ty, w - (text_x - x) - 20, bullets)
 
         # Parameter pill at the bottom
@@ -1957,27 +2011,28 @@ class Game:
         self._draw_param_pill(x + 20, pill_y, w - 40, param)
 
     def _draw_maze_preview(self, x, y, w, h):
-        """Animated mini-maze: player blip walks from start → key → exit."""
+        """Animated mini-maze: blip walks start → KEY → exit. Picking up
+        the key triggers a brief flash and the exit unseals from sealed-red
+        to pulsing cyan, with a transition flash so the unlock is obvious."""
         title = FONT_MD.render("HOW MAZE EXTRACTION WORKS", True, CYAN)
         screen.blit(title, (x + (w - title.get_width()) // 2, y))
         ty = y + title.get_height() + 14
 
         left_w = 280
-        # 13x9 sample maze (path=0, wall=1)
+        # Z-shaped corridor maze. Path stays on 0 cells the whole way.
+        # 11 cols × 7 rows. Start (1,1), key (1,7), exit (5,10) on right edge.
         sample = [
-            [1,1,1,1,1,1,1,1,1,1,1,1,1],
-            [1,0,0,0,0,1,0,0,0,0,0,0,1],
-            [1,1,1,1,0,1,0,1,1,1,1,0,1],
-            [1,0,0,0,0,1,0,1,0,0,0,0,1],
-            [1,0,1,1,1,1,0,1,0,1,1,1,1],
-            [1,0,0,0,0,0,0,1,0,0,0,0,1],
-            [1,1,1,1,1,1,1,1,1,1,1,0,0],
-            [1,0,0,0,0,0,0,0,0,0,1,0,1],
-            [1,1,1,1,1,1,1,1,1,1,1,1,1],
+            [1,1,1,1,1,1,1,1,1,1,1],
+            [1,0,0,0,0,0,0,0,0,0,1],   # top corridor: start ... key
+            [1,1,1,1,1,1,1,1,1,0,1],   # only col 9 connects down
+            [1,0,0,0,0,0,0,0,0,0,1],   # middle corridor
+            [1,0,1,1,1,1,1,1,1,1,1],   # only col 1 connects down
+            [1,0,0,0,0,0,0,0,0,0,0],   # bottom corridor → exit on right edge
+            [1,1,1,1,1,1,1,1,1,1,1],
         ]
         rows = len(sample); cols = len(sample[0])
         cell = min(left_w // cols, (h - title.get_height() - 70) // rows)
-        cell = max(14, cell)
+        cell = max(16, cell)
         board_x = x + 20 + (left_w - cols * cell) // 2
         board_y = ty
         for r in range(rows):
@@ -1987,16 +2042,21 @@ class Game:
                 color = (0, 110, 0) if sample[r][c] == 1 else (5, 30, 20)
                 pygame.draw.rect(screen, color, (cx, cy, cell, cell))
 
-        # Path: start (1,1) → key (3,1) → key (5,4) hop, then to exit (6,12)
-        path = [(1,1),(1,2),(1,3),(1,4),(2,4),(3,4),(3,3),(3,2),(3,1),
-                (3,2),(3,3),(3,4),(4,4),(5,4),(5,5),(5,6),(5,7),(5,8),
-                (5,9),(5,10),(6,10),(6,11),(6,12)]
-        kr, kc = 3, 1   # key cell
-        er, ec = 6, 12  # exit cell
+        # Path: top → grab key → down/back → bottom → exit.
+        path = [
+            (1,1),(1,2),(1,3),(1,4),(1,5),(1,6),(1,7),     # → KEY at (1,7)
+            (1,8),(1,9),(2,9),(3,9),                       # right and down
+            (3,8),(3,7),(3,6),(3,5),(3,4),(3,3),(3,2),(3,1),  # back left
+            (4,1),(5,1),                                   # down
+            (5,2),(5,3),(5,4),(5,5),(5,6),(5,7),(5,8),(5,9),(5,10),  # → EXIT
+        ]
+        kr, kc = 1, 7     # key cell
+        er, ec = 5, 10    # exit cell (right-edge gap)
 
         n_steps = len(path) - 1
-        cycle_len = n_steps + 6
-        progress = (self.trans_timer * 5.5) % cycle_len
+        # Pause briefly at the very end so players see the win state.
+        cycle_len = n_steps + 8
+        progress = (self.trans_timer * 7.0) % cycle_len
         idx = min(int(progress), n_steps)
         frac = max(0.0, min(1.0, progress - idx))
         if idx + 1 < len(path):
@@ -2006,36 +2066,80 @@ class Game:
         else:
             pr, pc = path[-1]
 
-        # Find when key is collected (path index reaches the key cell)
+        # Key pickup beat — fixed step in the path.
         try:
             key_pickup = path.index((kr, kc))
         except ValueError:
             key_pickup = 0
         key_collected = progress >= key_pickup
+        # How recently was the key collected? Drives the pickup flash + the
+        # exit-unlock flash (so players see WHY the exit just changed).
+        unlock_age = max(0.0, progress - key_pickup) if key_collected else 999
 
-        # Key (yellow diamond)
+        # Key (yellow diamond + ring while present, brief sparkle on pickup)
         if not key_collected:
             kx = board_x + kc * cell + cell // 2
             ky = board_y + kr * cell + cell // 2
-            kr_size = max(4, cell // 3)
+            kr_size = max(5, cell // 3)
+            pulse = int(abs(math.sin(time.time() * 4)) * 60) + 195
+            pygame.draw.circle(screen, (pulse, pulse, 0),
+                               (kx, ky), kr_size + 5, 2)
             pygame.draw.polygon(screen, YELLOW, [
                 (kx, ky - kr_size), (kx + kr_size, ky),
                 (kx, ky + kr_size), (kx - kr_size, ky)])
+        elif unlock_age < 1.2:
+            # Pickup sparkle: expanding yellow ring + "+ KEY" text floating up
+            kx = board_x + kc * cell + cell // 2
+            ky = board_y + kr * cell + cell // 2
+            t = unlock_age / 1.2
+            ring_r = int(cell * (0.4 + t * 0.8))
+            alpha_ring = max(0, 200 - int(t * 200))
+            ring_surf = pygame.Surface((ring_r * 2 + 4, ring_r * 2 + 4),
+                                       pygame.SRCALPHA)
+            pygame.draw.circle(ring_surf, (*YELLOW, alpha_ring),
+                               (ring_r + 2, ring_r + 2), ring_r, 2)
+            screen.blit(ring_surf, (kx - ring_r - 2, ky - ring_r - 2))
+            txt = FONT_SM.render("+ KEY", True, YELLOW)
+            screen.blit(txt, (kx - txt.get_width() // 2,
+                               ky - cell - int(t * 14)))
 
-        # Exit (pulses cyan once key is collected)
+        # Exit: sealed (dim red) before key, pulses cyan after, with an
+        # extra-bright flash for the first 1.2 s after pickup so the
+        # "exit unlocks" moment is unmistakable.
         ex = board_x + ec * cell
         ey = board_y + er * cell
-        if key_collected:
+        if not key_collected:
+            pygame.draw.rect(screen, (80, 0, 0), (ex, ey, cell, cell))
+            pygame.draw.rect(screen, RED, (ex, ey, cell, cell), 1)
+            lock = FONT_SM.render("X", True, RED)
+            screen.blit(lock, (ex + (cell - lock.get_width()) // 2,
+                                ey + (cell - lock.get_height()) // 2))
+        else:
             pulse = int(abs(math.sin(time.time() * 4)) * 60) + 195
             pygame.draw.rect(screen, (0, pulse, pulse), (ex, ey, cell, cell))
-            pygame.draw.rect(screen, WHITE, (ex, ey, cell, cell), 1)
-        else:
-            pygame.draw.rect(screen, (80, 0, 0), (ex, ey, cell, cell))
+            pygame.draw.rect(screen, WHITE, (ex, ey, cell, cell), 2)
+            if unlock_age < 1.2:
+                # Bright unlock flash + arrow callout
+                t = unlock_age / 1.2
+                ring_r = int(cell * (0.6 + t * 0.9))
+                a = max(0, 220 - int(t * 220))
+                fs = pygame.Surface((ring_r * 2 + 4, ring_r * 2 + 4),
+                                    pygame.SRCALPHA)
+                pygame.draw.circle(fs, (0, 255, 255, a),
+                                   (ring_r + 2, ring_r + 2), ring_r, 3)
+                screen.blit(fs, (ex + cell // 2 - ring_r - 2,
+                                  ey + cell // 2 - ring_r - 2))
+                if unlock_age < 0.9:
+                    txt = FONT_SM.render("EXIT OPEN", True, CYAN_BRIGHT)
+                    screen.blit(txt, (ex + cell - txt.get_width() // 2,
+                                       ey - 16))
 
-        # Player blip
+        # Player blip — bright cyan with a darker outline so it reads on green
         pxs = board_x + pc * cell + cell // 2
         pys = board_y + pr * cell + cell // 2
-        pygame.draw.circle(screen, CYAN, (int(pxs), int(pys)), max(3, cell // 3))
+        prad = max(4, cell // 3)
+        pygame.draw.circle(screen, BLACK, (int(pxs), int(pys)), prad + 1)
+        pygame.draw.circle(screen, CYAN_BRIGHT, (int(pxs), int(pys)), prad)
 
         # Right-column rules
         text_x = board_x + cols * cell + 40
