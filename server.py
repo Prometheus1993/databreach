@@ -155,11 +155,11 @@ def _start_services():
             '-nocursor',
             '-threads',
             '-ncache', '0',
-            # Scan/defer kept loose (~30 Hz) so we don't burn CPU encoding
-            # every tiny pixel diff from the matrix rain / CRT scanlines —
-            # the game still feels responsive but bandwidth stays tame.
-            '-wait', '30',
-            '-defer', '30',
+            # Match the 30 Hz cap in databreach.py — no point scanning faster
+            # than the game can produce frames.
+            '-wait', '33',
+            '-defer', '33',
+            '-rate', '30',
         ],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )

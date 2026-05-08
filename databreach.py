@@ -25,15 +25,18 @@ DEBUG = "--debug" in sys.argv
 pygame.init()
 
 WIDTH, HEIGHT = 1024, 768
-FPS = 60
+# 30 fps cap — over VNC every animated pixel has to be re-encoded and
+# streamed; 60 fps doubles the bandwidth/CPU for no visible benefit on
+# this kind of retro game.
+FPS = 30
 
 # Left-hand sidebar dimensions (timer + redaction file panel).
-# The active minigame draws into the right-hand "game area" alongside it.
-SIDEBAR_X = 16
-SIDEBAR_W = 280
-SIDEBAR_INNER_PAD = 14
-GAME_AREA_X = SIDEBAR_X + SIDEBAR_W + 16
-GAME_AREA_W = WIDTH - GAME_AREA_X - 16
+# Kept narrow so the right-hand game area gets most of the screen.
+SIDEBAR_X = 12
+SIDEBAR_W = 200
+SIDEBAR_INNER_PAD = 10
+GAME_AREA_X = SIDEBAR_X + SIDEBAR_W + 14
+GAME_AREA_W = WIDTH - GAME_AREA_X - 14
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("DATA BREACH")
 clock = pygame.time.Clock()
@@ -645,54 +648,57 @@ def draw_sidebar(surface, remaining, total, stages_completed,
     elif remaining > 10:
         t_color = YELLOW
     else:
-        t_color = RED_BRIGHT if int(time.time() * 4) % 2 else RED
+        # 1 Hz blink instead of 4 Hz so VNC re-encodes 1× per second.
+        t_color = RED_BRIGHT if int(time.time() * 2) % 2 else RED
 
-    label = FONT_SM.render("TIME LEFT", True, GREEN_DIM)
-    timer = FONT_HUGE.render(f"{secs:02d}", True, t_color)
-    block_pad = 10
-    block_h = label.get_height() + timer.get_height() + block_pad * 2 + 14
-    block_y = y + 12
+    label = FONT_SM.render("TIME", True, GREEN_DIM)
+    # FONT_LG (36px) instead of FONT_HUGE (96px) — fits the narrow sidebar.
+    timer = FONT_LG.render(f"{secs:02d}", True, t_color)
+    block_pad = 6
+    block_h = label.get_height() + timer.get_height() + block_pad * 2 + 12
+    block_y = y + 8
     pygame.draw.rect(surface, t_color, (inner_x, block_y, inner_w, block_h), 2)
     surface.blit(label, (inner_x + (inner_w - label.get_width()) // 2,
                           block_y + block_pad))
     surface.blit(timer, (inner_x + (inner_w - timer.get_width()) // 2,
-                          block_y + block_pad + label.get_height() + 2))
+                          block_y + block_pad + label.get_height()))
 
     # Thin progress bar at the bottom of the timer block
-    bar_y = block_y + block_h - 8
+    bar_y = block_y + block_h - 6
     bar_w = inner_w - 8
     bar_x = inner_x + 4
-    pygame.draw.rect(surface, (10, 30, 10), (bar_x, bar_y, bar_w, 4))
+    pygame.draw.rect(surface, (10, 30, 10), (bar_x, bar_y, bar_w, 3))
     if total > 0:
         fill = int(bar_w * max(0.0, min(1.0, remaining / total)))
-        pygame.draw.rect(surface, t_color, (bar_x, bar_y, fill, 4))
+        pygame.draw.rect(surface, t_color, (bar_x, bar_y, fill, 3))
 
     # --- File header ---------------------------------------------------------
-    fy = block_y + block_h + 18
+    fy = block_y + block_h + 12
     head = FONT_SM.render("REDACTION FILE", True, CYAN)
     surface.blit(head, (inner_x + (inner_w - head.get_width()) // 2, fy))
     fy += head.get_height() + 4
     pct = int(len(stages_completed) / 3 * 100)
     pct_color = CYAN_BRIGHT if pct == 100 else GREEN_DIM
-    pct_surf = FONT_SM.render(f"{pct}% UNREDACTED", True, pct_color)
+    pct_surf = FONT_SM.render(f"{pct}%", True, pct_color)
     surface.blit(pct_surf, (inner_x + (inner_w - pct_surf.get_width()) // 2, fy))
-    fy += pct_surf.get_height() + 12
+    fy += pct_surf.get_height() + 8
 
     # --- Vertical file (compact) --------------------------------------------
     font = FONT_SM
     label_w = max(font.size(lbl)[0] for lbl, _k, _s in INTEL_FIELDS)
-    val_x = inner_x + label_w + 10
+    val_x = inner_x + label_w + 8
     val_w = inner_x + inner_w - val_x
-    row_h = font.get_linesize() + 4
+    row_h = font.get_linesize() + 2
 
     for lbl, key, stage_idx in INTEL_FIELDS:
         unlocked = stage_idx in stages_completed
         is_active = (stage_idx == active_stage) and not unlocked
 
         if is_active:
-            pulse = int(abs(math.sin(time.time() * 3)) * 60) + 160
-            pygame.draw.rect(surface, (pulse, pulse, 0),
-                             (inner_x - 2, fy - 2, inner_w + 4, row_h + 2), 1)
+            # Static yellow border (no per-frame pulse) so VNC doesn't see
+            # constant pixel diffs in this row.
+            pygame.draw.rect(surface, YELLOW,
+                             (inner_x - 2, fy - 1, inner_w + 4, row_h), 1)
 
         if unlocked:
             lbl_color = GREEN
