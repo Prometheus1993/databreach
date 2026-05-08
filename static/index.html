@@ -246,6 +246,18 @@
 
       frame.addEventListener("load", () => {
         hookIframe();
+        // Strip vnc_lite.html's grey body + status bar — both sit on top of
+        // the canvas and look like a half-screen grey overlay.
+        try {
+          const doc = frame.contentDocument || frame.contentWindow.document;
+          const css = doc.createElement("style");
+          css.textContent = `
+            html, body { background: transparent !important;
+                          border-radius: 0 !important; margin: 0 !important; }
+            #noVNC_status_bar, #noVNC_status { display: none !important; }
+          `;
+          doc.head.appendChild(css);
+        } catch (_) {}
         let tries = 0;
         const retry = setInterval(() => {
           focusCanvas();
