@@ -156,10 +156,10 @@ def _start_services():
             '-threads',
             '-ncache', '0',
             # Match the 30 Hz cap in databreach.py — no point scanning faster
-            # than the game can produce frames.
+            # than the game can produce frames. (x11vnc has no -rate flag,
+            # the wait/defer pair is what controls scan/send cadence.)
             '-wait', '33',
             '-defer', '33',
-            '-rate', '30',
         ],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
