@@ -1,0 +1,1267 @@
+<html lang="en-us"><script src="https://pygame-web.github.io/cdn/0.9.3/pythons.js" type=module id="site" data-python="python3.12" data-LINES=42 data-COLUMNS=132 data-os="vtx,gui" async defer>#<!--
+
+print("""
+Loading databreach_server from databreach_server.apk
+    Pygbag Version : 0.9.3
+    Template Version : 0.9.3
+    Python  : 3.12
+    CDN URL : https://pygame-web.github.io/cdn/0.9.3/
+    Screen  : 1280x720
+    Title   : databreach_server
+    Folder  : databreach_server
+    Authors : pgw
+    SPDX-License-Identifier: cookiecutter.spdx
+
+""")
+
+import sys
+import asyncio
+import platform
+import json
+from pathlib import Path
+
+# do not rename
+async def custom_site():
+    import embed
+    platform.document.body.style.background = "#7f7f7f"
+
+    platform.window.transfer.hidden = true
+    platform.window.canvas.style.visibility = "visible"
+
+
+    bundle = "databreach_server"
+
+    # the C or js loader could do that but be explicit.
+    appdir = Path(f"/data/data/{bundle}") # /data/data/databreach_server
+    appdir.mkdir()
+
+
+    # unpack filesystem from compressed archive into work dir
+    if platform.window.location.host.find('.itch.zone')>0:
+        import zipfile
+        async with platform.fopen("databreach_server.apk", "rb") as archive:
+            with zipfile.ZipFile(archive) as zip_ref:
+                zip_ref.extractall(appdir.as_posix())
+    else:
+        import tarfile
+        async with platform.fopen("databreach_server.tar.gz", "rb") as archive:
+            tar = tarfile.open(fileobj=archive, mode="r:gz")
+            tar.extractall(path=appdir.as_posix(), filter='tar')
+            tar.close()
+
+    # preloader will change to work dir and prepend it to sys.path
+    platform.run_main(PyConfig, loaderhome= appdir / "assets", loadermain=None)
+
+
+    # wait preloading complete : that includes images and wasm compilation of bundled modules
+    while embed.counter()<0:
+        await asyncio.sleep(.1)
+
+    main = appdir / "assets" / "main.py"
+
+    # TODO: test for window.webkitAudioContext and block aio loop until gesture if accessing media manager play
+    # before a gesture is recorded ( touch or click )
+
+    # test/wait user media interaction
+    if not platform.window.MM.UME:
+
+        # now that apk is mounted we have access to font cache
+        # but we need to fill __file__ that is not yet set
+        __import__(__name__).__file__ = main
+
+        # now make a prompt
+        msg  = "Ready to start ! Please click/touch page"
+        platform.window.infobox.innerText = msg
+        print("\n"*4, f"    * Waiting for media user engagement. {msg} *" , "\n"*4)
+
+        while not platform.window.MM.UME:
+            await asyncio.sleep(.1)
+
+    # start async top level machinery if not started and add a console in any case if requested.
+    await TopLevel_async_handler.start_toplevel(platform.shell, console=window.python.config.debug)
+
+    # now that apk is mounted we have access to font cache
+    # but we need to fill __file__/__name__ that are not yet set
+    __import__(__name__).__file__ = main
+
+
+    def ui_callback(pkg):
+        platform.window.infobox.innerText = f"installing {pkg}"
+
+    await shell.source(main, callback=ui_callback)
+
+    # if you don't reach that step
+    # your main.py has an infinite sync loop somewhere !
+
+    platform.window.infobox.style.display = "none"
+    platform.window.config.gui_divider = 1
+    platform.window.window_resize()
+    print("default.tmpl: done")
+
+    shell.interactive()
+
+asyncio.run( custom_site() )
+
+
+
+
+
+
+
+
+
+
+
+
+# BEGIN BLOCK
+#
+# now this is the html part you can (and should) customize
+# It is not mandatory : pygame-script when it reads the first line (also called
+# shebang ) of above code create absolute minimal widget set
+# required for running with default rules
+#
+# do not alter that comment block it is separating python code from html code
+# =============================================================================
+# --></script><head><!--
+//=============================================================================
+//
+//
+//
+//
+//
+//
+//
+
+    {%- if cookiecutter.comment != "" -%}
+{{cookiecutter.comment}}
+    {% endif %}
+
+--><script type="application/javascript">
+// END BLOCK
+
+
+
+// this dict is available under PyConfig.config from __main__
+
+config = {
+    xtermjs : "1" ,
+    _sdl2 : "canvas",
+    user_canvas : 0,
+    user_canvas_managed : 0,
+    gui_divider : 2,
+    ume_block : 0,
+    can_close : 0,
+    archive : "databreach_server",
+    gui_debug : 2,
+    cdn : "https://pygame-web.github.io/cdn/0.9.3/",
+    autorun : 0,
+    PYBUILD : "3.12",
+    fb_ar   :  1.77,
+    fb_width : "1280",
+    fb_height : "720"
+}
+
+function show_infobox() {
+    infobox.style.display = "block";
+
+    // Measure box
+    const w = infobox.offsetWidth;
+    const h = infobox.offsetHeight;
+
+    // Center in viewport
+    const left = (window.innerWidth - w) / 2;
+    const top = (window.innerHeight - h) / 2;
+
+    infobox.style.left = left + "px";
+    infobox.style.top = top + "px";
+}
+
+</script>
+
+    <title>databreach_server</title>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="height=device-height, initial-scale=1.0">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes"/>
+
+
+    <link rel="icon" type="image/png" href="favicon.png" sizes="16x16">
+
+    <style>
+        #status {
+            display: inline-block;
+            vertical-align: top;
+            margin-top: 20px;
+            margin-left: 30px;
+            font-weight: bold;
+            color: rgb(120, 120, 120);
+        }
+
+        #progress {
+            height: 20px;
+            width: 300px;
+        }
+
+        #infobox {
+            position: fixed; /* center relative to viewport */
+            background: green;
+            color: blue;
+            font-weight: bold;
+            padding: 12px 24px;
+ /*           display: none; */
+            z-index: 999999;
+        }
+        div.emscripten { text-align: center; }
+        div.emscripten_border { border: 1px solid black; }
+        div.thick_border { border: 4px solid black; }
+
+        /* the canvas *must not* have any border or padding, or mouse coords will be wrong */
+        /* average size of droid screen 470dp x 320dp  */
+        canvas.emscripten {
+            border: 0px none;
+            background-color: transparent;
+            width: 100%;
+            height: 100%;
+            z-index: 5;
+
+            padding: 0;
+            margin: 0 auto;
+
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            right: 0;
+        }
+
+        body {
+            font-family: arial;
+            margin: 0;
+            padding: none;
+            background-color:powderblue;
+        }
+
+        .topright{
+           position:absolute;
+           top:0px;
+           right:0px;
+        }
+
+        .bottomright {
+            position:absolute;
+            top: 40%;
+            right: 0px;
+        }
+
+        .center {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .trinfo{
+           position: relative;
+           right: 0px;
+           border: 1px solid black;
+        }
+
+        .framed{
+           position: relative;
+           top: 150px;
+           right: 10px;
+           border: 1px solid black;
+        }
+
+        /* ---------- eye tracking overlay ---------- */
+        #eye-toolbar {
+            position: fixed;
+            top: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 8px;
+            z-index: 1000;
+            font-family: "Courier New", Courier, monospace;
+        }
+        .eye-btn {
+            background: rgba(0, 0, 0, 0.75);
+            color: #00e600;
+            border: 1px solid #00e600;
+            padding: 6px 12px;
+            font-family: inherit;
+            font-size: 11px;
+            letter-spacing: 2px;
+            cursor: pointer;
+            text-transform: uppercase;
+        }
+        .eye-btn:hover { background: rgba(0, 60, 0, 0.85); }
+        .eye-btn.active { background: rgba(0, 60, 0, 0.85); }
+        .eye-btn[disabled] { opacity: 0.35; cursor: not-allowed; }
+
+        #heatmap {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 50;
+            display: none;
+            mix-blend-mode: screen;
+        }
+        #heatmap.show { display: block; }
+
+        #stats {
+            position: fixed;
+            top: 8px;
+            right: 12px;
+            color: #00e600;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 11px;
+            letter-spacing: 2px;
+            background: rgba(0, 0, 0, 0.65);
+            border: 1px solid #003c00;
+            padding: 4px 10px;
+            z-index: 1000;
+            display: none;
+        }
+        #stats.show { display: block; }
+
+        #gaze-dot {
+            position: fixed;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: rgba(0, 230, 0, 0.85);
+            box-shadow: 0 0 12px #00e600;
+            pointer-events: none;
+            z-index: 9998;
+            transform: translate(-50%, -50%);
+            display: none;
+        }
+
+        #calib {
+            position: fixed; inset: 0;
+            background: rgba(0, 0, 0, 0.92);
+            z-index: 10000;
+            display: none;
+            font-family: "Courier New", Courier, monospace;
+        }
+        #calib.show { display: block; }
+        .calib-pt {
+            position: absolute;
+            width: 28px; height: 28px;
+            border-radius: 50%;
+            background: #00e600;
+            transform: translate(-50%, -50%);
+            cursor: pointer;
+            box-shadow: 0 0 16px #00e600;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 11px; color: #000; font-weight: bold;
+        }
+        .calib-pt.done { background: #003c00; box-shadow: none; color: #00e600; }
+        #calib-info {
+            position: absolute; top: 30px; left: 50%;
+            transform: translateX(-50%);
+            color: #00e600; font-size: 13px; letter-spacing: 3px;
+            text-align: center;
+        }
+        #calib-info small { display: block; opacity: 0.5; margin-top: 6px; font-size: 10px; }
+        #calib-cancel { position: absolute; top: 20px; right: 20px; }
+
+        #webgazerVideoContainer {
+            top: auto !important;
+            bottom: 10px !important;
+            left: 50% !important;
+            transform: translateX(-50%) !important;
+            right: auto !important;
+            opacity: 0.4;
+            z-index: 999 !important;
+        }
+
+        /* ---------- session report overlay ---------- */
+        #report {
+            position: fixed; inset: 0;
+            background: rgba(0, 0, 0, 0.96);
+            color: #00e600;
+            font-family: "Courier New", Courier, monospace;
+            z-index: 10001;
+            display: none;
+            overflow-y: auto;
+            padding: 20px 28px 40px;
+        }
+        #report.show { display: block; }
+        #report h2 {
+            font-size: 20px; letter-spacing: 5px; margin: 0 0 4px;
+        }
+        #report .meta {
+            font-size: 11px; letter-spacing: 2px; opacity: 0.6;
+        }
+        #report header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 18px; gap: 20px;
+        }
+        #report .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+        }
+        #report .card {
+            border: 1px solid #003c00;
+            background: rgba(0, 30, 0, 0.25);
+            padding: 12px 14px;
+        }
+        #report .card.wide { grid-column: 1 / -1; }
+        #report .card h3 {
+            font-size: 12px; letter-spacing: 4px; margin: 0 0 10px;
+            color: #00e600; opacity: 0.85;
+        }
+        #report .kv {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            row-gap: 6px; column-gap: 14px;
+            font-size: 12px; letter-spacing: 1px;
+        }
+        #report .kv span:nth-child(odd) { opacity: 0.55; }
+        #report table { width: 100%; font-size: 12px; border-collapse: collapse; letter-spacing: 1px; }
+        #report table td { padding: 4px 6px; }
+        #report table td:first-child { opacity: 0.8; }
+        #report table td:nth-child(2) { text-align: right; width: 64px; }
+        #report table .bar {
+            position: relative;
+            height: 8px; background: #001500; border: 1px solid #003c00;
+        }
+        #report table .bar-fill { position: absolute; inset: 0 auto 0 0; background: #00e600; }
+        #report canvas.viz {
+            width: 100%; display: block; background: #000;
+            border: 1px solid #003c00;
+        }
+        #report footer { margin-top: 14px; display: flex; gap: 10px; justify-content: flex-end; }
+    </style>
+
+    <script>
+/*
+        if (navigator.serviceWorker)
+            navigator.serviceWorker.register("https://pygame-web.github.io/cdn/0.9.3/pygbag0.9.3.js")
+        else
+            console.warn("Service workers not supported")
+*/
+    </script>
+
+    <script src="browserfs.min.js"></script>
+
+</head>
+
+<body>
+
+    <div id="transfer" align=center>
+<!--        <div class="spinner" id='spinner'></div> -->
+        <div class="emscripten" id="status">Downloading...</div>
+        <div class="emscripten">
+            <progress value="0" max="100" id="progress"></progress>
+        </div>
+    </div>
+
+
+
+    <canvas class="emscripten" id="canvas"
+width="1px"
+height="1px"
+    oncontextmenu="event.preventDefault()" tabindex=1>
+    </canvas>
+
+    <canvas class="emscripten" id="canvas3d"
+width="1280px"
+height="720px"
+    oncontextmenu="event.preventDefault()" tabindex=1 hidden>
+    </canvas>
+
+    <div id="infobox">Loading, please wait ...</div>
+
+    <div id=html></div>
+
+    <div id=crt  class=bottomright >
+
+        <div id="system" hidden>
+            <div class="button-container">
+                <button id="aiostop" disabled>AIO ⏏︎</button>
+                <button id="aiopaused_true" disabled>AIO ■</button>
+                <button id="aiopaused_false" disabled>AIO ▶</button>
+                <button id="pygame_mixer_music_pause" disabled>Music ■</button>
+            </div>
+
+            <div class="button-container">
+                <div id=load_min>min</div>
+                <div id=load_avg>avg</div>
+                <div id=load_max>max</div>
+              <button id="load_rst" disabled>RESET</button>
+            </div>
+
+            <div id="level">(battery level unknown)</div>
+            <div id="stateBattery">(charging state unknown)</div>
+
+        </div>
+
+        <div id=box class="emscripten_border" hidden=true>
+
+            <div id="info" class="trinfo"></div>
+
+            <iframe id="iframe" class="framed" name="iframe"
+width="470px" height="90%"
+allowtransparency="true"
+style="z-index: 10;"
+style="background: #FFFFFF;"
+frameborder="1"
+                allowfullscreen="true"
+                webkitallowfullscreen="true"
+                msallowfullscreen="true"
+                mozallowfullscreen="true"
+                sandbox="allow-same-origin allow-top-navigation allow-scripts allow-pointer-lock"
+                allow="autoplay; fullscreen *; geolocation; microphone; camera; midi; monetization; xr-spatial-tracking; gamepad; gyroscope; accelerometer; xr; cross-origin-isolated"
+                src="https://pygame-web.github.io/cdn/0.9.3/empty.html"
+                scrolling="yes">
+            </iframe>
+        </div>
+
+    </div>
+
+
+    <div id="dlg" hidden>
+        <input type="file" id="dlg_multifile" multiple accept="image/*">
+        <label for="dlg_multifile">Select files</label>
+    </div>
+
+    <div id="pyconsole">
+        <div id="terminal" tabIndex=1 align="left"></div>
+    </div>
+
+    <!-- eye tracking UI (observation mode — playtest analytics) -->
+    <div id="eye-toolbar">
+        <button class="eye-btn" id="eye-toggle">ENABLE EYE TRACKING</button>
+        <button class="eye-btn" id="eye-calibrate" disabled>CALIBRATE</button>
+        <button class="eye-btn" id="eye-dot" disabled>HIDE GAZE DOT</button>
+        <button class="eye-btn" id="eye-heatmap" disabled>SHOW HEATMAP</button>
+        <button class="eye-btn" id="eye-clear" disabled>CLEAR</button>
+        <button class="eye-btn" id="eye-report" disabled>REPORT</button>
+    </div>
+
+    <canvas id="heatmap"></canvas>
+    <div id="stats">SAMPLES: 0 · 00:00</div>
+    <div id="gaze-dot"></div>
+
+    <div id="calib">
+        <div id="calib-info">
+            CALIBRATION
+            <small>CLICK EACH GREEN DOT 5× WHILE LOOKING AT IT</small>
+        </div>
+        <button class="eye-btn" id="calib-cancel">CANCEL</button>
+    </div>
+
+    <div id="report">
+        <header>
+            <div>
+                <h2>SESSION REPORT</h2>
+                <div class="meta" id="rp-meta">—</div>
+            </div>
+            <button class="eye-btn" id="report-close">CLOSE</button>
+        </header>
+        <div class="grid">
+            <section class="card">
+                <h3>STATS</h3>
+                <div class="kv">
+                    <span>Samples</span><span id="rp-samples">0</span>
+                    <span>Duration</span><span id="rp-duration">0</span>
+                    <span>Sampling rate</span><span id="rp-rate">0 Hz</span>
+                    <span>Fixations</span><span id="rp-fix">0</span>
+                    <span>Saccades</span><span id="rp-sac">0</span>
+                    <span>Avg fixation</span><span id="rp-avgfix">0 ms</span>
+                    <span>Longest fixation</span><span id="rp-maxfix">0 ms</span>
+                </div>
+            </section>
+            <section class="card">
+                <h3>AREAS OF INTEREST (% TIME)</h3>
+                <table id="rp-aoi"></table>
+            </section>
+            <section class="card wide">
+                <h3>HEATMAP — where eyes spent the most time</h3>
+                <canvas id="rp-heatmap" class="viz" width="1280" height="540"></canvas>
+            </section>
+            <section class="card wide">
+                <h3>SCANPATH — order of fixations (radius = duration)</h3>
+                <canvas id="rp-scanpath" class="viz" width="1280" height="540"></canvas>
+            </section>
+            <section class="card wide">
+                <h3>VERTICAL ATTENTION OVER TIME</h3>
+                <canvas id="rp-timeline" class="viz" width="1280" height="180"></canvas>
+            </section>
+        </div>
+        <footer>
+            <button class="eye-btn" id="report-csv">EXPORT CSV</button>
+            <button class="eye-btn" id="report-png">SAVE REPORT AS PNG</button>
+        </footer>
+    </div>
+
+    <script type="application/javascript">
+    (function () {
+        // ---------- gaze smoothing ----------
+        const GAZE_WINDOW = 6;
+        const gazeBuf = [];
+        function smoothGaze(x, y) {
+            gazeBuf.push([x, y]);
+            if (gazeBuf.length > GAZE_WINDOW) gazeBuf.shift();
+            let sx = 0, sy = 0;
+            for (const [a, b] of gazeBuf) { sx += a; sy += b; }
+            return [sx / gazeBuf.length, sy / gazeBuf.length];
+        }
+
+        // ---------- heatmap ----------
+        const heatmap = document.getElementById("heatmap");
+        const hctx = heatmap.getContext("2d");
+        function sizeHeatmap() {
+            heatmap.width = window.innerWidth;
+            heatmap.height = window.innerHeight;
+        }
+        sizeHeatmap();
+        window.addEventListener("resize", sizeHeatmap);
+
+        // additive radial blob — accumulating samples make hotspots brighter
+        function addHeatPoint(x, y) {
+            const r = 36;
+            const grad = hctx.createRadialGradient(x, y, 0, x, y, r);
+            grad.addColorStop(0.0, "rgba(255, 60, 0, 0.18)");
+            grad.addColorStop(0.5, "rgba(255, 200, 0, 0.06)");
+            grad.addColorStop(1.0, "rgba(0, 80, 255, 0.00)");
+            hctx.globalCompositeOperation = "lighter";
+            hctx.fillStyle = grad;
+            hctx.beginPath();
+            hctx.arc(x, y, r, 0, Math.PI * 2);
+            hctx.fill();
+        }
+        function clearHeatmap() {
+            hctx.clearRect(0, 0, heatmap.width, heatmap.height);
+        }
+
+        // ---------- recording ----------
+        // each sample: { t: ms since session start, x, y, vw, vh, aoi }
+        const samples = [];
+        let sessionStartMs = 0;
+        let sessionStartIso = "";
+
+        // ---------- areas of interest (3x3 viewport grid + off-screen) ----------
+        const AOI_LABELS = [
+            "TOP-LEFT", "TOP-CENTER", "TOP-RIGHT",
+            "MID-LEFT", "CENTER",     "MID-RIGHT",
+            "BOT-LEFT", "BOT-CENTER", "BOT-RIGHT",
+            "OFF-SCREEN",
+        ];
+        const aoiCounts = Object.fromEntries(AOI_LABELS.map(l => [l, 0]));
+
+        function classifyAOI(x, y) {
+            const w = window.innerWidth, h = window.innerHeight;
+            if (x < 0 || y < 0 || x > w || y > h) return "OFF-SCREEN";
+            const col = x < w / 3 ? 0 : x < (2 * w) / 3 ? 1 : 2;
+            const row = y < h / 3 ? 0 : y < (2 * h) / 3 ? 1 : 2;
+            const rowName = ["TOP", "MID", "BOT"][row];
+            const colName = ["LEFT", "CENTER", "RIGHT"][col];
+            if (rowName === "MID" && colName === "CENTER") return "CENTER";
+            return `${rowName}-${colName}`;
+        }
+
+        // ---------- fixation detection (I-DT, dispersion threshold) ----------
+        const FIX_DISP_PX = 60;     // max bounding-box size for a fixation
+        const FIX_MIN_DUR_MS = 100; // shorter than this = noise, drop it
+        const fixations = []; // { x, y, duration, startMs, n }
+        let curFix = null;
+
+        function processFixation(x, y, t) {
+            if (!curFix) {
+                curFix = { sx: x, sy: y, n: 1, start: t, end: t,
+                           minX: x, maxX: x, minY: y, maxY: y };
+                return;
+            }
+            const minX = Math.min(curFix.minX, x);
+            const maxX = Math.max(curFix.maxX, x);
+            const minY = Math.min(curFix.minY, y);
+            const maxY = Math.max(curFix.maxY, y);
+            if (maxX - minX <= FIX_DISP_PX && maxY - minY <= FIX_DISP_PX) {
+                curFix.sx += x; curFix.sy += y; curFix.n++;
+                curFix.end = t;
+                curFix.minX = minX; curFix.maxX = maxX;
+                curFix.minY = minY; curFix.maxY = maxY;
+            } else {
+                finalizeFixation();
+                curFix = { sx: x, sy: y, n: 1, start: t, end: t,
+                           minX: x, maxX: x, minY: y, maxY: y };
+            }
+        }
+        function finalizeFixation() {
+            if (!curFix) return;
+            const dur = curFix.end - curFix.start;
+            if (dur >= FIX_MIN_DUR_MS) {
+                fixations.push({
+                    x: curFix.sx / curFix.n,
+                    y: curFix.sy / curFix.n,
+                    duration: dur,
+                    startMs: curFix.start,
+                    n: curFix.n,
+                });
+            }
+            curFix = null;
+        }
+
+        function resetAnalytics() {
+            for (const k of Object.keys(aoiCounts)) aoiCounts[k] = 0;
+            fixations.length = 0;
+            curFix = null;
+        }
+
+        // ---------- gaze loop ----------
+        const gazeDot = document.getElementById("gaze-dot");
+        const statsEl = document.getElementById("stats");
+        let lastGazeAt = 0;
+        let gazeDotVisible = true;
+        let heatmapVisible = false;
+
+        function fmtElapsed(ms) {
+            const s = Math.floor(ms / 1000);
+            const mm = String(Math.floor(s / 60)).padStart(2, "0");
+            const ss = String(s % 60).padStart(2, "0");
+            return `${mm}:${ss}`;
+        }
+        let lastStatsUpdate = 0;
+        function updateStats(now) {
+            if (now - lastStatsUpdate < 250) return;
+            lastStatsUpdate = now;
+            const elapsed = sessionStartMs ? now - sessionStartMs : 0;
+            statsEl.textContent = `SAMPLES: ${samples.length} · ${fmtElapsed(elapsed)}`;
+        }
+
+        function onGaze(data) {
+            if (!data) return;
+            const now = performance.now();
+            lastGazeAt = now;
+            const [x, y] = smoothGaze(data.x, data.y);
+
+            if (gazeDotVisible) {
+                gazeDot.style.display = "block";
+                gazeDot.style.left = x + "px";
+                gazeDot.style.top  = y + "px";
+            }
+
+            // record
+            if (sessionStartMs) {
+                const tMs = Math.round(now - sessionStartMs);
+                const aoi = classifyAOI(x, y);
+                aoiCounts[aoi] = (aoiCounts[aoi] || 0) + 1;
+                processFixation(x, y, tMs);
+                samples.push({
+                    t: tMs,
+                    x: Math.round(x),
+                    y: Math.round(y),
+                    vw: window.innerWidth,
+                    vh: window.innerHeight,
+                    aoi,
+                });
+                addHeatPoint(x, y);
+                updateStats(now);
+            }
+        }
+
+        // ---------- export ----------
+        function exportCSV() {
+            if (samples.length === 0) {
+                alert("No samples recorded yet.");
+                return;
+            }
+            const header = "session_start_iso,t_ms,x_px,y_px,viewport_w,viewport_h,aoi\n";
+            const rows = samples.map(s =>
+                `${sessionStartIso},${s.t},${s.x},${s.y},${s.vw},${s.vh},${s.aoi || ""}`
+            ).join("\n");
+            const blob = new Blob([header + rows + "\n"], { type: "text/csv" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            const stamp = sessionStartIso.replace(/[:.]/g, "-");
+            a.href = url;
+            a.download = `databreach_gaze_${stamp}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+
+        // ---------- report rendering ----------
+        const reportEl = document.getElementById("report");
+        const rpHeatmap   = document.getElementById("rp-heatmap");
+        const rpScanpath  = document.getElementById("rp-scanpath");
+        const rpTimeline  = document.getElementById("rp-timeline");
+
+        function fitVizCanvas(canvas) {
+            // make the bitmap match the displayed CSS width to keep drawings sharp
+            const dispW = canvas.clientWidth || canvas.width;
+            const ratio = canvas.height / canvas.width; // preserve aspect
+            canvas.width  = Math.max(640, Math.round(dispW));
+            canvas.height = Math.round(canvas.width * ratio);
+        }
+
+        function renderReportHeatmap() {
+            fitVizCanvas(rpHeatmap);
+            const ctx = rpHeatmap.getContext("2d");
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, rpHeatmap.width, rpHeatmap.height);
+            // map viewport -> canvas
+            const sx = rpHeatmap.width / Math.max(1, window.innerWidth);
+            const sy = rpHeatmap.height / Math.max(1, window.innerHeight);
+            const r = 28;
+            ctx.globalCompositeOperation = "lighter";
+            for (const s of samples) {
+                const x = s.x * sx, y = s.y * sy;
+                const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+                grad.addColorStop(0.0, "rgba(255, 60, 0, 0.22)");
+                grad.addColorStop(0.5, "rgba(255, 200, 0, 0.07)");
+                grad.addColorStop(1.0, "rgba(0, 80, 255, 0.00)");
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.arc(x, y, r, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalCompositeOperation = "source-over";
+            // grid overlay (thirds)
+            ctx.strokeStyle = "rgba(0, 230, 0, 0.18)";
+            ctx.lineWidth = 1;
+            for (let i = 1; i < 3; i++) {
+                const gx = (i / 3) * rpHeatmap.width;
+                const gy = (i / 3) * rpHeatmap.height;
+                ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, rpHeatmap.height); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(rpHeatmap.width, gy); ctx.stroke();
+            }
+        }
+
+        function renderScanpath() {
+            fitVizCanvas(rpScanpath);
+            const ctx = rpScanpath.getContext("2d");
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, rpScanpath.width, rpScanpath.height);
+            const sx = rpScanpath.width / Math.max(1, window.innerWidth);
+            const sy = rpScanpath.height / Math.max(1, window.innerHeight);
+            // grid
+            ctx.strokeStyle = "rgba(0, 230, 0, 0.12)";
+            for (let i = 1; i < 3; i++) {
+                const gx = (i / 3) * rpScanpath.width;
+                const gy = (i / 3) * rpScanpath.height;
+                ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, rpScanpath.height); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(rpScanpath.width, gy); ctx.stroke();
+            }
+            const fixes = fixations;
+            if (fixes.length === 0) return;
+            // lines
+            ctx.strokeStyle = "rgba(0, 230, 0, 0.55)";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            for (let i = 0; i < fixes.length; i++) {
+                const f = fixes[i];
+                const px = f.x * sx, py = f.y * sy;
+                if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+            }
+            ctx.stroke();
+            // circles + labels
+            ctx.font = "11px 'Courier New', Courier, monospace";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            const maxDur = fixes.reduce((m, f) => Math.max(m, f.duration), 1);
+            for (let i = 0; i < fixes.length; i++) {
+                const f = fixes[i];
+                const px = f.x * sx, py = f.y * sy;
+                const r = 6 + 18 * Math.sqrt(f.duration / maxDur);
+                ctx.fillStyle = "rgba(0, 230, 0, 0.25)";
+                ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.fill();
+                ctx.strokeStyle = "rgba(0, 230, 0, 0.9)";
+                ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.stroke();
+                ctx.fillStyle = "#00e600";
+                ctx.fillText(String(i + 1), px, py);
+            }
+        }
+
+        function renderTimeline() {
+            fitVizCanvas(rpTimeline);
+            const ctx = rpTimeline.getContext("2d");
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, rpTimeline.width, rpTimeline.height);
+            if (samples.length < 2) return;
+            const tMax = samples[samples.length - 1].t || 1;
+            // y baseline at middle, screen-y up = high on chart
+            ctx.strokeStyle = "rgba(0, 230, 0, 0.2)";
+            ctx.beginPath();
+            ctx.moveTo(0, rpTimeline.height / 2);
+            ctx.lineTo(rpTimeline.width, rpTimeline.height / 2);
+            ctx.stroke();
+            ctx.strokeStyle = "rgba(0, 230, 0, 0.9)";
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            for (let i = 0; i < samples.length; i++) {
+                const s = samples[i];
+                const px = (s.t / tMax) * rpTimeline.width;
+                const py = (s.y / Math.max(1, s.vh)) * rpTimeline.height;
+                if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+            }
+            ctx.stroke();
+            // labels
+            ctx.fillStyle = "rgba(0, 230, 0, 0.7)";
+            ctx.font = "10px 'Courier New', Courier, monospace";
+            ctx.textAlign = "left";
+            ctx.fillText("TOP OF SCREEN", 6, 12);
+            ctx.fillText("BOTTOM OF SCREEN", 6, rpTimeline.height - 6);
+            ctx.textAlign = "right";
+            ctx.fillText(`+${(tMax / 1000).toFixed(1)}s`, rpTimeline.width - 6, 12);
+        }
+
+        function renderAoiTable() {
+            const total = Object.values(aoiCounts).reduce((a, b) => a + b, 0);
+            const rows = AOI_LABELS
+                .map(l => ({ label: l, n: aoiCounts[l] || 0 }))
+                .filter(r => r.n > 0)
+                .sort((a, b) => b.n - a.n);
+            const tbl = document.getElementById("rp-aoi");
+            if (total === 0 || rows.length === 0) {
+                tbl.innerHTML = `<tr><td colspan="3" style="opacity:.5">no samples yet</td></tr>`;
+                return;
+            }
+            tbl.innerHTML = rows.map(r => {
+                const pct = (r.n / total) * 100;
+                return `<tr>
+                    <td>${r.label}</td>
+                    <td>${pct.toFixed(1)}%</td>
+                    <td><div class="bar"><div class="bar-fill" style="width:${pct.toFixed(1)}%"></div></div></td>
+                </tr>`;
+            }).join("");
+        }
+
+        function renderReport() {
+            // make sure the in-progress fixation gets included
+            const snapshot = curFix;
+            finalizeFixation();
+            curFix = snapshot; // restore so live tracking continues uninterrupted
+
+            const elapsedMs = sessionStartMs ? performance.now() - sessionStartMs : 0;
+            const hz = elapsedMs > 0 ? (samples.length / (elapsedMs / 1000)) : 0;
+            const fixDurations = fixations.map(f => f.duration);
+            const avgFix = fixDurations.length
+                ? fixDurations.reduce((a, b) => a + b, 0) / fixDurations.length : 0;
+            const maxFix = fixDurations.length ? Math.max(...fixDurations) : 0;
+
+            document.getElementById("rp-meta").textContent =
+                `START ${sessionStartIso || "—"}  ·  VIEWPORT ${window.innerWidth}×${window.innerHeight}`;
+            document.getElementById("rp-samples").textContent  = samples.length;
+            document.getElementById("rp-duration").textContent = fmtElapsed(elapsedMs);
+            document.getElementById("rp-rate").textContent     = `${hz.toFixed(1)} Hz`;
+            document.getElementById("rp-fix").textContent      = fixations.length;
+            document.getElementById("rp-sac").textContent      = Math.max(0, fixations.length - 1);
+            document.getElementById("rp-avgfix").textContent   = `${Math.round(avgFix)} ms`;
+            document.getElementById("rp-maxfix").textContent   = `${Math.round(maxFix)} ms`;
+
+            renderAoiTable();
+            // wait one frame so canvases have layout (clientWidth)
+            requestAnimationFrame(() => {
+                renderReportHeatmap();
+                renderScanpath();
+                renderTimeline();
+            });
+        }
+
+        function openReport() {
+            reportEl.classList.add("show");
+            renderReport();
+        }
+        function closeReport() { reportEl.classList.remove("show"); }
+
+        async function saveReportAsPNG() {
+            // stitch the three viz canvases + a header into one PNG
+            const pad = 24, gap = 20, headerH = 70;
+            const W = Math.max(rpHeatmap.width, rpScanpath.width, rpTimeline.width) + pad * 2;
+            const H = headerH + rpHeatmap.height + rpScanpath.height + rpTimeline.height
+                    + gap * 4 + pad * 2;
+            const out = document.createElement("canvas");
+            out.width = W; out.height = H;
+            const c = out.getContext("2d");
+            c.fillStyle = "#000"; c.fillRect(0, 0, W, H);
+            c.fillStyle = "#00e600";
+            c.font = "bold 22px 'Courier New', Courier, monospace";
+            c.fillText("DATA BREACH — SESSION REPORT", pad, pad + 22);
+            c.font = "12px 'Courier New', Courier, monospace";
+            c.fillStyle = "rgba(0, 230, 0, 0.6)";
+            const elapsedMs = sessionStartMs ? performance.now() - sessionStartMs : 0;
+            c.fillText(
+                `${sessionStartIso}  ·  ${samples.length} samples  ·  ${fmtElapsed(elapsedMs)}  ·  ${fixations.length} fixations`,
+                pad, pad + 44
+            );
+            let y = headerH + pad;
+            const drawSection = (title, src) => {
+                c.fillStyle = "rgba(0, 230, 0, 0.85)";
+                c.font = "bold 13px 'Courier New', Courier, monospace";
+                c.fillText(title, pad, y - 6);
+                c.drawImage(src, pad, y, src.width, src.height);
+                y += src.height + gap;
+            };
+            drawSection("HEATMAP", rpHeatmap);
+            drawSection("SCANPATH", rpScanpath);
+            drawSection("VERTICAL ATTENTION OVER TIME", rpTimeline);
+
+            const stamp = (sessionStartIso || new Date().toISOString()).replace(/[:.]/g, "-");
+            out.toBlob((blob) => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `databreach_report_${stamp}.png`;
+                document.body.appendChild(a);
+                a.click(); a.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+            }, "image/png");
+        }
+
+        // calibration
+        const calibEl = document.getElementById("calib");
+        const calibCancelBtn = document.getElementById("calib-cancel");
+        let calibActive = false;
+
+        function openCalibration() {
+            calibActive = true;
+            gazeDot.style.display = "none";
+            calibEl.querySelectorAll(".calib-pt").forEach((n) => n.remove());
+            const positions = [];
+            for (const py of [0.1, 0.5, 0.9]) for (const px of [0.1, 0.5, 0.9]) positions.push([px, py]);
+            const CLICKS = 5;
+            let remaining = positions.length;
+            positions.forEach(([px, py]) => {
+                const dot = document.createElement("div");
+                dot.className = "calib-pt";
+                dot.style.left = (px * 100) + "%";
+                dot.style.top  = (py * 100) + "%";
+                let clicks = 0;
+                dot.textContent = CLICKS;
+                dot.addEventListener("click", () => {
+                    clicks++;
+                    dot.textContent = Math.max(0, CLICKS - clicks);
+                    if (clicks >= CLICKS) {
+                        dot.classList.add("done");
+                        dot.textContent = "✓";
+                        dot.style.pointerEvents = "none";
+                        if (--remaining === 0) closeCalibration();
+                    }
+                });
+                calibEl.appendChild(dot);
+            });
+            calibEl.classList.add("show");
+        }
+        function closeCalibration() {
+            calibEl.classList.remove("show");
+            calibActive = false;
+            if (gazeDotVisible) gazeDot.style.display = "block";
+        }
+        calibCancelBtn.addEventListener("click", closeCalibration);
+
+        // ---------- toolbar ----------
+        const toggleBtn  = document.getElementById("eye-toggle");
+        const calibBtn   = document.getElementById("eye-calibrate");
+        const dotBtn     = document.getElementById("eye-dot");
+        const heatmapBtn = document.getElementById("eye-heatmap");
+        const clearBtn   = document.getElementById("eye-clear");
+        const reportBtn  = document.getElementById("eye-report");
+
+        let webgazerReady = false;
+        let webgazerOn = false;
+
+        function setActionButtonsEnabled(on) {
+            calibBtn.disabled = !on;
+            dotBtn.disabled = !on;
+            heatmapBtn.disabled = !on;
+            clearBtn.disabled = !on;
+            reportBtn.disabled = !on;
+        }
+
+        async function startWebgazer() {
+            if (typeof webgazer === "undefined") {
+                alert("WebGazer failed to load — check your internet connection.");
+                return;
+            }
+            toggleBtn.textContent = "STARTING…";
+            toggleBtn.disabled = true;
+            try {
+                // MediaPipe FaceMesh otherwise fetches its assets relative to
+                // this host and 404s — pin it to jsDelivr so it actually loads.
+                if (typeof window.FaceMesh === "function" && !window.__faceMeshPatched) {
+                    const OrigFM = window.FaceMesh;
+                    window.FaceMesh = function (opts) {
+                        return new OrigFM({
+                            locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`,
+                            ...(opts || {}),
+                        });
+                    };
+                    window.__faceMeshPatched = true;
+                }
+                webgazer.params.showVideoPreview = true;
+                webgazer.params.showFaceOverlay = false;
+                webgazer.params.showFaceFeedbackBox = false;
+                webgazer.showPredictionPoints(false);
+                await webgazer
+                    .setRegression("ridge")
+                    .setGazeListener((data) => onGaze(data))
+                    .begin();
+                webgazerReady = true;
+                webgazerOn = true;
+                sessionStartMs = performance.now();
+                sessionStartIso = new Date().toISOString();
+                toggleBtn.textContent = "DISABLE EYE TRACKING";
+                toggleBtn.classList.add("active");
+                toggleBtn.disabled = false;
+                statsEl.classList.add("show");
+                setActionButtonsEnabled(true);
+                setTimeout(() => { if (webgazerOn && samples.length < 5) openCalibration(); }, 800);
+            } catch (e) {
+                console.error("[eye tracking] webgazer begin failed:", e);
+                const reason = (e && (e.name || e.message)) || "unknown";
+                let hint = "";
+                if (/NotAllowed|Permission/i.test(reason)) {
+                    hint = "\n\nChrome blocks the camera for this site. Click the 🔒 icon left of the URL → Site settings → Camera → Allow, then refresh.";
+                } else if (/NotFound|Devices/i.test(reason)) {
+                    hint = "\n\nNo webcam was detected. Make sure one is connected and not disabled.";
+                } else if (/NotReadable|TrackStart/i.test(reason)) {
+                    hint = "\n\nThe webcam is in use by another app (Zoom, Teams, OBS, …). Close it and try again.";
+                } else if (/Secure|https/i.test(reason)) {
+                    hint = "\n\nThe browser only allows webcam access on HTTPS or localhost.";
+                }
+                alert("Could not start eye tracking.\nReason: " + reason + hint);
+                toggleBtn.textContent = "ENABLE EYE TRACKING";
+                toggleBtn.disabled = false;
+            }
+        }
+        function stopWebgazer() {
+            if (!webgazerReady) return;
+            webgazerOn = false;
+            try { webgazer.pause(); webgazer.showVideoPreview(false); } catch (_) {}
+            gazeDot.style.display = "none";
+            toggleBtn.textContent = "ENABLE EYE TRACKING";
+            toggleBtn.classList.remove("active");
+            // keep export+clear enabled so the user can still grab the data
+            calibBtn.disabled = true;
+            dotBtn.disabled = true;
+            heatmapBtn.disabled = true;
+        }
+
+        toggleBtn.addEventListener("click", () => {
+            if (!webgazerReady) startWebgazer();
+            else if (webgazerOn) stopWebgazer();
+            else {
+                webgazer.resume(); webgazer.showVideoPreview(true);
+                webgazerOn = true;
+                if (!sessionStartMs) {
+                    sessionStartMs = performance.now();
+                    sessionStartIso = new Date().toISOString();
+                }
+                toggleBtn.textContent = "DISABLE EYE TRACKING";
+                toggleBtn.classList.add("active");
+                setActionButtonsEnabled(true);
+            }
+        });
+        calibBtn.addEventListener("click", openCalibration);
+        dotBtn.addEventListener("click", () => {
+            gazeDotVisible = !gazeDotVisible;
+            dotBtn.textContent = gazeDotVisible ? "HIDE GAZE DOT" : "SHOW GAZE DOT";
+            if (!gazeDotVisible) gazeDot.style.display = "none";
+        });
+        heatmapBtn.addEventListener("click", () => {
+            heatmapVisible = !heatmapVisible;
+            heatmap.classList.toggle("show", heatmapVisible);
+            heatmapBtn.textContent = heatmapVisible ? "HIDE HEATMAP" : "SHOW HEATMAP";
+        });
+        clearBtn.addEventListener("click", () => {
+            if (!confirm("Clear all recorded gaze data?")) return;
+            samples.length = 0;
+            clearHeatmap();
+            resetAnalytics();
+            sessionStartMs = performance.now();
+            sessionStartIso = new Date().toISOString();
+            updateStats(performance.now());
+        });
+        reportBtn.addEventListener("click", openReport);
+        document.getElementById("report-close").addEventListener("click", closeReport);
+        document.getElementById("report-csv").addEventListener("click", exportCSV);
+        document.getElementById("report-png").addEventListener("click", saveReportAsPNG);
+        // close report on Escape
+        document.addEventListener("keydown", (e) => {
+            if (e.key === "Escape" && reportEl.classList.contains("show")) closeReport();
+        });
+
+        // preload webgazer in the background
+        (function loadWebgazer() {
+            if (typeof webgazer !== "undefined") return;
+            const s = document.createElement("script");
+            s.src = "https://cdn.jsdelivr.net/npm/webgazer@3.3.0/dist/webgazer.min.js";
+            s.onerror = () => console.warn("webgazer load failed");
+            document.head.appendChild(s);
+        })();
+    })();
+    </script>
+
+    <script type="application/javascript">
+
+    globalThis.__canvas_resized = (self, ecw, ech) => {
+        console.warn("TODO: panda3d canvas monitor", self, ecw, ech)
+    }
+
+    async function custom_onload(debug_hidden) {
+        // this is called before anything python is loaded
+        // make your js customization here
+        console.log(__FILE__, "custom_onload")
+
+        pyconsole.hidden = debug_hidden
+        system.hidden = debug_hidden
+        transfer.hidden = debug_hidden
+        info.hidden = debug_hidden
+        box.hidden =  debug_hidden
+
+        show_infobox()
+    }
+
+    function custom_prerun(){
+        // no python main and no (MEMFS + VFS) yet.
+        console.log(__FILE__, "custom_prerun")
+
+    }
+
+    function custom_postrun(){
+        // python main and no VFS filesystem yet.
+        console.log(__FILE__, "custom_postrun")
+
+    }
+
+    function debug() {
+        // allow to gain access to dev tools from js console
+        // but only on desktop. difficult to reach when in iframe
+        python.config.debug = true
+        custom_onload(false)
+        Module.PyRun_SimpleString("shell.uptime()")
+        window_resize()
+    }
+
+    function info_inline(data){
+        document.getElementById("info").innerHTML = data
+    }
+
+    function info_online(url) {
+        // display info about current APK
+        fetch( url /*, options */)
+            .then((response) => response.text())
+            .then((html) => {
+                info_inline(html);
+        })
+        .catch((error) => {
+            console.warn(error);
+        });
+    }
+
+    function frame_online(url) {
+        window.frames["iframe"].location = url;
+    }
+
+    </script>
+
+</body>
+</html>

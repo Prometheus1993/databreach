@@ -25,18 +25,15 @@ DEBUG = "--debug" in sys.argv
 pygame.init()
 
 WIDTH, HEIGHT = 1024, 768
-# 30 fps cap — over VNC every animated pixel has to be re-encoded and
-# streamed; 60 fps doubles the bandwidth/CPU for no visible benefit on
-# this kind of retro game.
-FPS = 30
+FPS = 60
 
 # Left-hand sidebar dimensions (timer + redaction file panel).
-# Kept narrow so the right-hand game area gets most of the screen.
-SIDEBAR_X = 12
-SIDEBAR_W = 200
-SIDEBAR_INNER_PAD = 10
-GAME_AREA_X = SIDEBAR_X + SIDEBAR_W + 14
-GAME_AREA_W = WIDTH - GAME_AREA_X - 14
+# The active minigame draws into the right-hand "game area" alongside it.
+SIDEBAR_X = 16
+SIDEBAR_W = 280
+SIDEBAR_INNER_PAD = 14
+GAME_AREA_X = SIDEBAR_X + SIDEBAR_W + 16
+GAME_AREA_W = WIDTH - GAME_AREA_X - 16
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("DATA BREACH")
 clock = pygame.time.Clock()
@@ -451,11 +448,8 @@ SCANLINES = create_scanlines()
 VIGNETTE = create_vignette()
 
 def apply_crt(surface):
-    # Disabled — over noVNC the SCANLINES surface modulates every visible
-    # pixel each frame, which forces the VNC encoder to re-diff the entire
-    # framebuffer every tick. The retro CRT look is a free upgrade locally
-    # but a measurable bandwidth/latency cost when streaming.
-    return
+    surface.blit(SCANLINES, (0, 0))
+    surface.blit(VIGNETTE, (0, 0))
 
 
 # --- MATRIX RAIN -------------------------------------------------------------
@@ -651,57 +645,54 @@ def draw_sidebar(surface, remaining, total, stages_completed,
     elif remaining > 10:
         t_color = YELLOW
     else:
-        # 1 Hz blink instead of 4 Hz so VNC re-encodes 1× per second.
-        t_color = RED_BRIGHT if int(time.time() * 2) % 2 else RED
+        t_color = RED_BRIGHT if int(time.time() * 4) % 2 else RED
 
-    label = FONT_SM.render("TIME", True, GREEN_DIM)
-    # FONT_LG (36px) instead of FONT_HUGE (96px) — fits the narrow sidebar.
-    timer = FONT_LG.render(f"{secs:02d}", True, t_color)
-    block_pad = 6
-    block_h = label.get_height() + timer.get_height() + block_pad * 2 + 12
-    block_y = y + 8
+    label = FONT_SM.render("TIME LEFT", True, GREEN_DIM)
+    timer = FONT_HUGE.render(f"{secs:02d}", True, t_color)
+    block_pad = 10
+    block_h = label.get_height() + timer.get_height() + block_pad * 2 + 14
+    block_y = y + 12
     pygame.draw.rect(surface, t_color, (inner_x, block_y, inner_w, block_h), 2)
     surface.blit(label, (inner_x + (inner_w - label.get_width()) // 2,
                           block_y + block_pad))
     surface.blit(timer, (inner_x + (inner_w - timer.get_width()) // 2,
-                          block_y + block_pad + label.get_height()))
+                          block_y + block_pad + label.get_height() + 2))
 
     # Thin progress bar at the bottom of the timer block
-    bar_y = block_y + block_h - 6
+    bar_y = block_y + block_h - 8
     bar_w = inner_w - 8
     bar_x = inner_x + 4
-    pygame.draw.rect(surface, (10, 30, 10), (bar_x, bar_y, bar_w, 3))
+    pygame.draw.rect(surface, (10, 30, 10), (bar_x, bar_y, bar_w, 4))
     if total > 0:
         fill = int(bar_w * max(0.0, min(1.0, remaining / total)))
-        pygame.draw.rect(surface, t_color, (bar_x, bar_y, fill, 3))
+        pygame.draw.rect(surface, t_color, (bar_x, bar_y, fill, 4))
 
     # --- File header ---------------------------------------------------------
-    fy = block_y + block_h + 12
+    fy = block_y + block_h + 18
     head = FONT_SM.render("REDACTION FILE", True, CYAN)
     surface.blit(head, (inner_x + (inner_w - head.get_width()) // 2, fy))
     fy += head.get_height() + 4
     pct = int(len(stages_completed) / 3 * 100)
     pct_color = CYAN_BRIGHT if pct == 100 else GREEN_DIM
-    pct_surf = FONT_SM.render(f"{pct}%", True, pct_color)
+    pct_surf = FONT_SM.render(f"{pct}% UNREDACTED", True, pct_color)
     surface.blit(pct_surf, (inner_x + (inner_w - pct_surf.get_width()) // 2, fy))
-    fy += pct_surf.get_height() + 8
+    fy += pct_surf.get_height() + 12
 
     # --- Vertical file (compact) --------------------------------------------
     font = FONT_SM
     label_w = max(font.size(lbl)[0] for lbl, _k, _s in INTEL_FIELDS)
-    val_x = inner_x + label_w + 8
+    val_x = inner_x + label_w + 10
     val_w = inner_x + inner_w - val_x
-    row_h = font.get_linesize() + 2
+    row_h = font.get_linesize() + 4
 
     for lbl, key, stage_idx in INTEL_FIELDS:
         unlocked = stage_idx in stages_completed
         is_active = (stage_idx == active_stage) and not unlocked
 
         if is_active:
-            # Static yellow border (no per-frame pulse) so VNC doesn't see
-            # constant pixel diffs in this row.
-            pygame.draw.rect(surface, YELLOW,
-                             (inner_x - 2, fy - 1, inner_w + 4, row_h), 1)
+            pulse = int(abs(math.sin(time.time() * 3)) * 60) + 160
+            pygame.draw.rect(surface, (pulse, pulse, 0),
+                             (inner_x - 2, fy - 2, inner_w + 4, row_h + 2), 1)
 
         if unlocked:
             lbl_color = GREEN
@@ -729,39 +720,41 @@ def draw_sidebar(surface, remaining, total, stages_completed,
 
 
 def draw_urgency_overlay(surface, remaining):
-    """Border-only urgency tint — no full-screen alpha so we don't churn
-    every pixel each frame (rough on noVNC bandwidth and CPU).
-
-    The sidebar timer already pulses colour for urgency; this just adds
-    a thin coloured border around the screen as an extra peripheral cue.
-
-    ≤30s, >10s — static yellow border
-    ≤10s       — slow red blink (1 Hz, two states only)
-    """
+    """Subtle screen-wide urgency tint:
+    ≤30s — soft yellow vignette
+    ≤10s — gentle red flicker
+    Kept low-alpha so it conveys urgency without getting in the way."""
     if remaining > 30:
         return
-
     if remaining > 10:
-        cache_key = "urgency_yellow"
-        color = (240, 200, 0, 60)
+        # Yellow vignette: stronger at edges, faint in the middle.
+        pulse = int((math.sin(time.time() * 2.2) + 1) * 8) + 12  # 12..28
+        cache_key = ("urgency_yellow", pulse)
     else:
-        # Two-state 1Hz blink — only one frame change per second, not per
-        # frame, so VNC barely notices.
-        if int(time.time() * 2) % 2:
-            return
-        cache_key = "urgency_red"
-        color = (220, 20, 20, 90)
+        # Red flicker: gentle pulsing alpha, never spikes too high.
+        bright = (math.sin(time.time() * 6.0) + 1) * 0.5  # 0..1
+        a = int(20 + bright * 28)  # 20..48
+        cache_key = ("urgency_red", a)
 
     cache = draw_urgency_overlay._cache
     overlay = cache.get(cache_key)
     if overlay is None:
         overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-        edge = 18
-        pygame.draw.rect(overlay, color, (0, 0, WIDTH, edge))
-        pygame.draw.rect(overlay, color, (0, HEIGHT - edge, WIDTH, edge))
-        pygame.draw.rect(overlay, color, (0, 0, edge, HEIGHT))
-        pygame.draw.rect(overlay, color, (WIDTH - edge, 0, edge, HEIGHT))
+        cx, cy = WIDTH // 2, HEIGHT // 2
+        max_d = math.hypot(cx, cy)
+        if cache_key[0] == "urgency_yellow":
+            base = (240, 200, 0)
+            alpha_max = cache_key[1]
+            for r in range(int(max_d), 0, -8):
+                t = r / max_d
+                a = int(alpha_max * (t ** 2))
+                pygame.draw.circle(overlay, (*base, a), (cx, cy), r)
+        else:
+            overlay.fill((220, 20, 20, cache_key[1]))
         cache[cache_key] = overlay
+        if len(cache) > 64:
+            cache.clear()
+            cache[cache_key] = overlay
     surface.blit(overlay, (0, 0))
 
 draw_urgency_overlay._cache = {}
