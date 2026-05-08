@@ -26,6 +26,14 @@ pygame.init()
 
 WIDTH, HEIGHT = 1024, 768
 FPS = 60
+
+# Left-hand sidebar dimensions (timer + redaction file panel).
+# The active minigame draws into the right-hand "game area" alongside it.
+SIDEBAR_X = 16
+SIDEBAR_W = 280
+SIDEBAR_INNER_PAD = 14
+GAME_AREA_X = SIDEBAR_X + SIDEBAR_W + 16
+GAME_AREA_W = WIDTH - GAME_AREA_X - 16
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("DATA BREACH")
 clock = pygame.time.Clock()
@@ -615,6 +623,142 @@ def draw_file_status(surface, x, y, stages_completed, font=FONT_SM):
     row_y += lh
     return row_y
 
+def draw_sidebar(surface, remaining, total, stages_completed,
+                 active_stage=None, intel=None):
+    """Left-hand panel: timer on top + compact redaction file below.
+    `active_stage` (0/1/2) highlights the field group the player is currently
+    unredacting. Drawn so the timer is never obscured by the minigame."""
+    intel = intel if intel is not None else INTEL
+    x, y, w, h = SIDEBAR_X, 12, SIDEBAR_W, HEIGHT - 24
+
+    # Outer panel
+    pygame.draw.rect(surface, BLACK, (x, y, w, h))
+    pygame.draw.rect(surface, GREEN, (x, y, w, h), 2)
+
+    inner_x = x + SIDEBAR_INNER_PAD
+    inner_w = w - SIDEBAR_INNER_PAD * 2
+
+    # --- Timer block ---------------------------------------------------------
+    secs = max(0, int(remaining + 0.5))
+    if remaining > 30:
+        t_color = GREEN_BRIGHT
+    elif remaining > 10:
+        t_color = YELLOW
+    else:
+        t_color = RED_BRIGHT if int(time.time() * 4) % 2 else RED
+
+    label = FONT_SM.render("TIME LEFT", True, GREEN_DIM)
+    timer = FONT_HUGE.render(f"{secs:02d}", True, t_color)
+    block_pad = 10
+    block_h = label.get_height() + timer.get_height() + block_pad * 2 + 14
+    block_y = y + 12
+    pygame.draw.rect(surface, t_color, (inner_x, block_y, inner_w, block_h), 2)
+    surface.blit(label, (inner_x + (inner_w - label.get_width()) // 2,
+                          block_y + block_pad))
+    surface.blit(timer, (inner_x + (inner_w - timer.get_width()) // 2,
+                          block_y + block_pad + label.get_height() + 2))
+
+    # Thin progress bar at the bottom of the timer block
+    bar_y = block_y + block_h - 8
+    bar_w = inner_w - 8
+    bar_x = inner_x + 4
+    pygame.draw.rect(surface, (10, 30, 10), (bar_x, bar_y, bar_w, 4))
+    if total > 0:
+        fill = int(bar_w * max(0.0, min(1.0, remaining / total)))
+        pygame.draw.rect(surface, t_color, (bar_x, bar_y, fill, 4))
+
+    # --- File header ---------------------------------------------------------
+    fy = block_y + block_h + 18
+    head = FONT_SM.render("REDACTION FILE", True, CYAN)
+    surface.blit(head, (inner_x + (inner_w - head.get_width()) // 2, fy))
+    fy += head.get_height() + 4
+    pct = int(len(stages_completed) / 3 * 100)
+    pct_color = CYAN_BRIGHT if pct == 100 else GREEN_DIM
+    pct_surf = FONT_SM.render(f"{pct}% UNREDACTED", True, pct_color)
+    surface.blit(pct_surf, (inner_x + (inner_w - pct_surf.get_width()) // 2, fy))
+    fy += pct_surf.get_height() + 12
+
+    # --- Vertical file (compact) --------------------------------------------
+    font = FONT_SM
+    label_w = max(font.size(lbl)[0] for lbl, _k, _s in INTEL_FIELDS)
+    val_x = inner_x + label_w + 10
+    val_w = inner_x + inner_w - val_x
+    row_h = font.get_linesize() + 4
+
+    for lbl, key, stage_idx in INTEL_FIELDS:
+        unlocked = stage_idx in stages_completed
+        is_active = (stage_idx == active_stage) and not unlocked
+
+        if is_active:
+            pulse = int(abs(math.sin(time.time() * 3)) * 60) + 160
+            pygame.draw.rect(surface, (pulse, pulse, 0),
+                             (inner_x - 2, fy - 2, inner_w + 4, row_h + 2), 1)
+
+        if unlocked:
+            lbl_color = GREEN
+        elif is_active:
+            lbl_color = WHITE
+        else:
+            lbl_color = GREEN_DIM
+        surface.blit(font.render(lbl, True, lbl_color), (inner_x, fy))
+
+        if unlocked:
+            value = intel[key].upper()
+            while font.size(value)[0] > val_w and len(value) > 3:
+                value = value[:-1]
+            surface.blit(font.render(value, True, CYAN), (val_x, fy))
+        else:
+            block_h2 = font.get_height() - 4
+            pygame.draw.rect(surface, (0, 40, 0),
+                             (val_x, fy + 2, val_w, block_h2))
+            num_blocks = max(2, val_w // 9)
+            blocks = font.render("█" * num_blocks, True,
+                                 GREEN if is_active else GREEN_DIM)
+            # clip wider-than-cell blocks via subsurface trick (just blit)
+            surface.blit(blocks, (val_x + 2, fy))
+        fy += row_h
+
+
+def draw_urgency_overlay(surface, remaining):
+    """Subtle screen-wide urgency tint:
+    ≤30s — soft yellow vignette
+    ≤10s — gentle red flicker
+    Kept low-alpha so it conveys urgency without getting in the way."""
+    if remaining > 30:
+        return
+    if remaining > 10:
+        # Yellow vignette: stronger at edges, faint in the middle.
+        pulse = int((math.sin(time.time() * 2.2) + 1) * 8) + 12  # 12..28
+        cache_key = ("urgency_yellow", pulse)
+    else:
+        # Red flicker: gentle pulsing alpha, never spikes too high.
+        bright = (math.sin(time.time() * 6.0) + 1) * 0.5  # 0..1
+        a = int(20 + bright * 28)  # 20..48
+        cache_key = ("urgency_red", a)
+
+    cache = draw_urgency_overlay._cache
+    overlay = cache.get(cache_key)
+    if overlay is None:
+        overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        cx, cy = WIDTH // 2, HEIGHT // 2
+        max_d = math.hypot(cx, cy)
+        if cache_key[0] == "urgency_yellow":
+            base = (240, 200, 0)
+            alpha_max = cache_key[1]
+            for r in range(int(max_d), 0, -8):
+                t = r / max_d
+                a = int(alpha_max * (t ** 2))
+                pygame.draw.circle(overlay, (*base, a), (cx, cy), r)
+        else:
+            overlay.fill((220, 20, 20, cache_key[1]))
+        cache[cache_key] = overlay
+        if len(cache) > 64:
+            cache.clear()
+            cache[cache_key] = overlay
+    surface.blit(overlay, (0, 0))
+
+draw_urgency_overlay._cache = {}
+
 
 # --- MAZE GENERATION ---------------------------------------------------------
 
@@ -1172,6 +1316,10 @@ class Game:
             # Disruption events / comms / hacks disabled — playtesters found
             # the visual noise distracting. The functions remain but are no-ops.
 
+            # Per-protocol urgency overlay: yellow ≤30s, red flicker ≤10s.
+            # Subtle by design — meant to convey pressure, not block visibility.
+            if self.state in ("roulette", "maze", "connect", "intel"):
+                draw_urgency_overlay(screen, self.remaining_time())
 
             # Flash overlay
             if self.flash_timer > 0:
@@ -1681,21 +1829,57 @@ class Game:
             ]
         return self.trans_label, []
 
+    def _draw_preview_bullets(self, x, y, w, bullets):
+        """Right-column numbered bullets used by every loading-screen preview.
+        Bullets: list of (num, text, color)."""
+        for num, text, color in bullets:
+            cx = x + 14
+            cy = y + FONT_SM.get_height() // 2 + 2
+            pygame.draw.circle(screen, color, (cx, cy), 13)
+            num_s = FONT_SM.render(num, True, BLACK)
+            screen.blit(num_s, (cx - num_s.get_width() // 2,
+                                cy - num_s.get_height() // 2))
+            # Word-wrap text to fit `w - 36`
+            max_w = w - 36
+            words = text.split(' ')
+            line = ""
+            ly = y
+            for word in words:
+                test = (line + ' ' + word).strip()
+                if FONT_SM.size(test)[0] <= max_w:
+                    line = test
+                else:
+                    draw_text(screen, line, x + 34, ly, FONT_SM, color)
+                    line = word
+                    ly += FONT_SM.get_linesize() + 2
+            if line:
+                draw_text(screen, line, x + 34, ly, FONT_SM, color)
+                ly += FONT_SM.get_linesize() + 2
+            y = max(ly, y + 28) + 4
+        return y
+
+    def _draw_param_pill(self, x, y, w, label):
+        """Compact parameter strip drawn at the bottom of every preview."""
+        pad = 10
+        surf = FONT_SM.render(label, True, CYAN_BRIGHT)
+        pill_h = surf.get_height() + pad
+        pygame.draw.rect(screen, (0, 30, 30), (x, y, w, pill_h))
+        pygame.draw.rect(screen, CYAN, (x, y, w, pill_h), 1)
+        screen.blit(surf, (x + (w - surf.get_width()) // 2, y + pad // 2))
+        return y + pill_h
+
     def _draw_connect_preview(self, x, y, w, h):
-        """Tiny mockup of the node-link minigame so players see the goal."""
+        """Animated mini node-link board so players see the goal."""
         title = FONT_MD.render("HOW NODE LINK WORKS", True, CYAN)
         screen.blit(title, (x + (w - title.get_width()) // 2, y))
         ty = y + title.get_height() + 14
 
-        # Two-column layout: left = mini board, right = explanatory text
-        left_w = 260
-        board_x = x + 30
+        left_w = 280
+        board_x = x + 20
         board_y = ty
-        # Draw a small grid background
-        cell = 36
-        cols, rows = left_w // cell, (h - title.get_height() - 30) // cell
-        cols = max(5, cols)
-        rows = max(4, rows)
+        cell = 32
+        cols = left_w // cell
+        rows = max(5, (h - title.get_height() - 70) // cell)
         for r in range(rows):
             for c in range(cols):
                 cx = board_x + c * cell
@@ -1703,94 +1887,328 @@ class Game:
                 pygame.draw.rect(screen, (5, 35, 25), (cx, cy, cell, cell))
                 pygame.draw.rect(screen, (0, 60, 0), (cx, cy, cell, cell), 1)
 
-        # Place 4 numbered nodes
-        nodes = [(0, 1), (3, 0), (4, 3), (1, 3)]  # (col, row)
+        # 4 nodes — same positions every load so muscle memory builds
+        nodes = [(0, 1), (3, 0), (4, 3), (1, 3)]
         nodes_xy = [(board_x + c * cell + cell // 2,
                      board_y + r * cell + cell // 2) for c, r in nodes]
+        # Sample trail 1→2 (right-angle path) drawn progressively
+        trail_full = [nodes_xy[0],
+                      (nodes_xy[1][0], nodes_xy[0][1]),
+                      nodes_xy[1]]
+        # Total path length
+        seg_lens = [math.hypot(trail_full[i+1][0]-trail_full[i][0],
+                               trail_full[i+1][1]-trail_full[i][1])
+                    for i in range(len(trail_full)-1)]
+        total_len = sum(seg_lens)
+        cycle = (self.trans_timer * 90.0) % (total_len + 60)
+        drawn = []
+        remaining = min(cycle, total_len)
+        for i, seg in enumerate(seg_lens):
+            if remaining <= 0:
+                break
+            if not drawn:
+                drawn.append(trail_full[i])
+            if remaining >= seg:
+                drawn.append(trail_full[i+1])
+                remaining -= seg
+            else:
+                t = remaining / seg
+                drawn.append((trail_full[i][0] + (trail_full[i+1][0] - trail_full[i][0]) * t,
+                              trail_full[i][1] + (trail_full[i+1][1] - trail_full[i][1]) * t))
+                remaining = 0
+        if len(drawn) >= 2:
+            pygame.draw.lines(screen, GREEN_BRIGHT, False,
+                              [(int(p[0]), int(p[1])) for p in drawn], 4)
 
-        # Draw a sample trail 1 → 2 (right-angle path) so players see the rule
-        trail = [
-            nodes_xy[0],
-            (nodes_xy[1][0], nodes_xy[0][1]),
-            nodes_xy[1],
-        ]
-        if len(trail) >= 2:
-            pygame.draw.lines(screen, GREEN_BRIGHT, False, trail, 4)
-
-        # Obstacle (red square) somewhere mid-board
+        # Obstacle
         ob_c, ob_r = 2, 2
         ob_x = board_x + ob_c * cell + 4
         ob_y = board_y + ob_r * cell + 4
         pygame.draw.rect(screen, RED, (ob_x, ob_y, cell - 8, cell - 8))
 
-        # Numbered nodes on top
+        # Numbered nodes
         for idx, (px, py) in enumerate(nodes_xy):
-            r = 14
-            color = CYAN_BRIGHT if idx < 2 else GREEN
+            r = 13
+            connected = cycle >= total_len * (idx / max(1, len(nodes_xy) - 1))
+            color = CYAN_BRIGHT if connected and idx <= 1 else (
+                GREEN_BRIGHT if idx == 1 else GREEN if idx > 1 else CYAN_BRIGHT)
             pygame.draw.circle(screen, color, (px, py), r)
             pygame.draw.circle(screen, BLACK, (px, py), r - 4)
             num = FONT_SM.render(str(idx + 1), True, color)
             screen.blit(num, (px - num.get_width() // 2, py - num.get_height() // 2))
 
-        # Right column — bullet explanations
+        # Right-column rules
         text_x = board_x + left_w + 30
-        text_y = ty
+        diff = self.diff
         bullets = [
-            ("1", "Walk from node 1 to node 2 to 3 to 4 IN ORDER", GREEN_BRIGHT),
-            ("2", "Use ARROW KEYS — only up/down/left/right", GREEN),
-            ("3", "Avoid red obstacles", RED_BRIGHT),
-            ("4", "Don't cross your own trail", YELLOW),
+            ("1", "Walk from node 1 → 2 → 3 → … IN ORDER.", GREEN_BRIGHT),
+            ("2", "ARROW KEYS to move.", GREEN),
+            ("3", "Avoid RED obstacles.", RED_BRIGHT),
+            ("4", "Don't cross your own trail.", YELLOW),
         ]
-        for num, text, color in bullets:
-            pygame.draw.circle(screen, color, (text_x + 12, text_y + FONT_MD.get_height() // 2 + 2), 12)
-            num_s = FONT_SM.render(num, True, BLACK)
-            screen.blit(num_s, (text_x + 12 - num_s.get_width() // 2,
-                                text_y + FONT_MD.get_height() // 2 + 2 - num_s.get_height() // 2))
-            draw_text(screen, text, text_x + 34, text_y, FONT_MD, color)
-            text_y += FONT_MD.get_linesize() + 6
+        if diff.get("num_gates", 0) > 0:
+            bullets.append(("5", "Pass through YELLOW GATES to unlock the matching node.", CYAN))
+        self._draw_preview_bullets(text_x, ty, w - (text_x - x) - 20, bullets)
 
-    def _draw_maze_legend(self, x, y, w):
-        """Quick visual legend explaining the icons used in the maze."""
-        title = FONT_MD.render("MAZE ICONS", True, CYAN)
+        # Parameter pill at the bottom
+        pill_y = y + h - 30
+        param = (f"TIME {diff['connect_time']}s   ·   NODES {diff.get('num_nodes', 4)}"
+                 f"   ·   GATES {diff.get('num_gates', 0)}   ·   +2s per gate")
+        self._draw_param_pill(x + 20, pill_y, w - 40, param)
+
+    def _draw_maze_preview(self, x, y, w, h):
+        """Animated mini-maze: player blip walks from start → key → exit."""
+        title = FONT_MD.render("HOW MAZE EXTRACTION WORKS", True, CYAN)
         screen.blit(title, (x + (w - title.get_width()) // 2, y))
-        y += title.get_height() + 12
-        # rows: (icon-draw-fn, label, color)
-        row_h = 44
-        cs = 28  # icon cell size
-        ix = x + 30
-        # Key — yellow diamond
-        cy = y + row_h // 2
-        pygame.draw.polygon(screen, YELLOW, [(ix + cs // 2, cy - cs // 2),
-                                              (ix + cs, cy),
-                                              (ix + cs // 2, cy + cs // 2),
-                                              (ix, cy)])
-        draw_text(screen, "KEY  —  pick up first to open the exit",
-                  ix + cs + 18, cy - FONT_MD.get_height() // 2, FONT_MD, YELLOW)
-        y += row_h
-        # Exit — pulsing cyan square
-        cy = y + row_h // 2
-        pygame.draw.rect(screen, CYAN_BRIGHT, (ix, cy - cs // 2, cs, cs))
-        pygame.draw.rect(screen, WHITE, (ix, cy - cs // 2, cs, cs), 1)
-        draw_text(screen, "EXIT —  step here AFTER grabbing the key",
-                  ix + cs + 18, cy - FONT_MD.get_height() // 2, FONT_MD, CYAN_BRIGHT)
-        y += row_h
-        # Time pickup — green plus
-        cy = y + row_h // 2
-        pygame.draw.line(screen, GREEN_BRIGHT,
-                         (ix, cy), (ix + cs, cy), 5)
-        pygame.draw.line(screen, GREEN_BRIGHT,
-                         (ix + cs // 2, cy - cs // 2), (ix + cs // 2, cy + cs // 2), 5)
-        draw_text(screen, "+10s — extra time pickup",
-                  ix + cs + 18, cy - FONT_MD.get_height() // 2, FONT_MD, GREEN_BRIGHT)
-        y += row_h
-        # Guard — red dot
-        if self.diff.get("maze_guards", 0) > 0:
-            cy = y + row_h // 2
-            pygame.draw.circle(screen, RED, (ix + cs // 2, cy), cs // 2)
-            draw_text(screen, "GUARD — stay out of their line of sight",
-                      ix + cs + 18, cy - FONT_MD.get_height() // 2, FONT_MD, RED_BRIGHT)
-            y += row_h
-        return y
+        ty = y + title.get_height() + 14
+
+        left_w = 280
+        # 13x9 sample maze (path=0, wall=1)
+        sample = [
+            [1,1,1,1,1,1,1,1,1,1,1,1,1],
+            [1,0,0,0,0,1,0,0,0,0,0,0,1],
+            [1,1,1,1,0,1,0,1,1,1,1,0,1],
+            [1,0,0,0,0,1,0,1,0,0,0,0,1],
+            [1,0,1,1,1,1,0,1,0,1,1,1,1],
+            [1,0,0,0,0,0,0,1,0,0,0,0,1],
+            [1,1,1,1,1,1,1,1,1,1,1,0,0],
+            [1,0,0,0,0,0,0,0,0,0,1,0,1],
+            [1,1,1,1,1,1,1,1,1,1,1,1,1],
+        ]
+        rows = len(sample); cols = len(sample[0])
+        cell = min(left_w // cols, (h - title.get_height() - 70) // rows)
+        cell = max(14, cell)
+        board_x = x + 20 + (left_w - cols * cell) // 2
+        board_y = ty
+        for r in range(rows):
+            for c in range(cols):
+                cx = board_x + c * cell
+                cy = board_y + r * cell
+                color = (0, 110, 0) if sample[r][c] == 1 else (5, 30, 20)
+                pygame.draw.rect(screen, color, (cx, cy, cell, cell))
+
+        # Path: start (1,1) → key (3,1) → key (5,4) hop, then to exit (6,12)
+        path = [(1,1),(1,2),(1,3),(1,4),(2,4),(3,4),(3,3),(3,2),(3,1),
+                (3,2),(3,3),(3,4),(4,4),(5,4),(5,5),(5,6),(5,7),(5,8),
+                (5,9),(5,10),(6,10),(6,11),(6,12)]
+        kr, kc = 3, 1   # key cell
+        er, ec = 6, 12  # exit cell
+
+        n_steps = len(path) - 1
+        cycle_len = n_steps + 6
+        progress = (self.trans_timer * 5.5) % cycle_len
+        idx = min(int(progress), n_steps)
+        frac = max(0.0, min(1.0, progress - idx))
+        if idx + 1 < len(path):
+            r1, c1 = path[idx]; r2, c2 = path[idx + 1]
+            pr = r1 + (r2 - r1) * frac
+            pc = c1 + (c2 - c1) * frac
+        else:
+            pr, pc = path[-1]
+
+        # Find when key is collected (path index reaches the key cell)
+        try:
+            key_pickup = path.index((kr, kc))
+        except ValueError:
+            key_pickup = 0
+        key_collected = progress >= key_pickup
+
+        # Key (yellow diamond)
+        if not key_collected:
+            kx = board_x + kc * cell + cell // 2
+            ky = board_y + kr * cell + cell // 2
+            kr_size = max(4, cell // 3)
+            pygame.draw.polygon(screen, YELLOW, [
+                (kx, ky - kr_size), (kx + kr_size, ky),
+                (kx, ky + kr_size), (kx - kr_size, ky)])
+
+        # Exit (pulses cyan once key is collected)
+        ex = board_x + ec * cell
+        ey = board_y + er * cell
+        if key_collected:
+            pulse = int(abs(math.sin(time.time() * 4)) * 60) + 195
+            pygame.draw.rect(screen, (0, pulse, pulse), (ex, ey, cell, cell))
+            pygame.draw.rect(screen, WHITE, (ex, ey, cell, cell), 1)
+        else:
+            pygame.draw.rect(screen, (80, 0, 0), (ex, ey, cell, cell))
+
+        # Player blip
+        pxs = board_x + pc * cell + cell // 2
+        pys = board_y + pr * cell + cell // 2
+        pygame.draw.circle(screen, CYAN, (int(pxs), int(pys)), max(3, cell // 3))
+
+        # Right-column rules
+        text_x = board_x + cols * cell + 40
+        diff = self.diff
+        bullets = [
+            ("1", "Find the YELLOW KEY first — exit stays sealed.", YELLOW),
+            ("2", "Then reach the CYAN EXIT.", CYAN_BRIGHT),
+            ("3", "ARROW KEYS to move. Green + tiles give +10s.", GREEN_BRIGHT),
+        ]
+        if diff.get("maze_guards", 0) > 0:
+            bullets.append(("4", "Avoid RED guards' line of sight.", RED_BRIGHT))
+        if diff.get("maze_fog", 0) > 0:
+            bullets.append((str(len(bullets) + 1), "Fog of war — only see what's near you.", GREEN_DIM))
+        self._draw_preview_bullets(text_x, ty, w - (text_x - x) - 20, bullets)
+
+        # Parameter pill
+        pill_y = y + h - 30
+        mw, mh = diff["maze_size"]
+        guards_str = f"   ·   GUARDS {diff.get('maze_guards', 0)}" if diff.get("maze_guards", 0) > 0 else ""
+        fog_str = "   ·   FOG ON" if diff.get("maze_fog", 0) > 0 else ""
+        param = f"TIME {diff['maze_time']}s   ·   SIZE {mw}x{mh}{guards_str}{fog_str}"
+        self._draw_param_pill(x + 20, pill_y, w - 40, param)
+
+    def _draw_roulette_preview(self, x, y, w, h):
+        """Animated digit reels — digits roll, then lock onto target sequentially."""
+        title = FONT_MD.render("HOW ACCESS CODE WORKS", True, CYAN)
+        screen.blit(title, (x + (w - title.get_width()) // 2, y))
+        ty = y + title.get_height() + 14
+
+        left_w = 280
+        n = 4
+        digit_w = 42
+        gap = 8
+        total_w = n * digit_w + (n - 1) * gap
+        base_x = x + 20 + (left_w - total_w) // 2
+
+        target = [3, 8, 1, 5]
+        # Target row
+        tlbl = FONT_SM.render("TARGET", True, YELLOW)
+        screen.blit(tlbl, (base_x + total_w // 2 - tlbl.get_width() // 2, ty))
+        target_y = ty + tlbl.get_height() + 4
+        for i, d in enumerate(target):
+            dx = base_x + i * (digit_w + gap)
+            pygame.draw.rect(screen, DARK_GREEN, (dx, target_y, digit_w, 50))
+            pygame.draw.rect(screen, YELLOW, (dx, target_y, digit_w, 50), 2)
+            ts = FONT_LG.render(str(d), True, YELLOW)
+            screen.blit(ts, (dx + (digit_w - ts.get_width()) // 2,
+                              target_y + (50 - ts.get_height()) // 2))
+
+        # Current row (animated)
+        cur_y = target_y + 70
+        clbl = FONT_SM.render("CURRENT", True, GREEN)
+        screen.blit(clbl, (base_x + total_w // 2 - clbl.get_width() // 2, cur_y))
+        cur_y += clbl.get_height() + 4
+        # Lock one digit every 0.9s, full cycle ~6s
+        per = 0.9
+        cycle = per * (n + 1)
+        t = self.trans_timer % cycle
+        locked = min(n, int(t / per))
+        for i in range(n):
+            dx = base_x + i * (digit_w + gap)
+            if i < locked:
+                d = target[i]
+                color = CYAN
+                bg = (0, 40, 40)
+            elif i == locked:
+                d = int(t * 14) % 10
+                color = WHITE
+                bg = (20, 20, 20)
+            else:
+                d = int(t * 6 + i * 3) % 10
+                color = GREEN_DIM
+                bg = (10, 10, 10)
+            pygame.draw.rect(screen, bg, (dx, cur_y, digit_w, 50))
+            pygame.draw.rect(screen, color, (dx, cur_y, digit_w, 50), 2)
+            ts = FONT_LG.render(str(d), True, color)
+            screen.blit(ts, (dx + (digit_w - ts.get_width()) // 2,
+                              cur_y + (50 - ts.get_height()) // 2))
+        # Arrow under the digit currently being locked
+        if locked < n:
+            ax = base_x + locked * (digit_w + gap) + digit_w // 2
+            pygame.draw.polygon(screen, WHITE, [(ax, cur_y + 56),
+                                                 (ax - 7, cur_y + 68),
+                                                 (ax + 7, cur_y + 68)])
+
+        # Right-column rules
+        text_x = x + 20 + left_w + 30
+        diff = self.diff
+        bullets = [
+            ("1", "Watch the digits spin in CURRENT.", GREEN),
+            ("2", "Press SPACE to lock a digit.", GREEN_BRIGHT),
+            ("3", "Match every TARGET digit to win.", CYAN_BRIGHT),
+            ("4", "Each correct digit grants +3s of game time.", YELLOW),
+        ]
+        if not diff.get("roulette_keep", True):
+            bullets.append(("5", "Wrong lock RESETS all digits.", RED_BRIGHT))
+        self._draw_preview_bullets(text_x, ty, w - (text_x - x) - 20, bullets)
+
+        # Parameter pill
+        pill_y = y + h - 30
+        keep = "KEEP CORRECT" if diff.get("roulette_keep", True) else "FULL RESET"
+        param = (f"TIME {diff['roulette_time']}s   ·   DIGITS {diff['roulette_digits']}"
+                 f"   ·   ON MISS: {keep}")
+        self._draw_param_pill(x + 20, pill_y, w - 40, param)
+
+    def _draw_intel_preview(self, x, y, w, h):
+        """Animated typing into a redacted field — illustrates the intel phase."""
+        title = FONT_MD.render("HOW INTEL PHASE WORKS", True, CYAN)
+        screen.blit(title, (x + (w - title.get_width()) // 2, y))
+        ty = y + title.get_height() + 14
+
+        left_w = 280
+        # Mini file with 3 rows: 1 unlocked (cyan), 1 active (typing), 1 redacted
+        rows = [
+            ("TARGET",   "BLACKOUT", "unlocked"),
+            ("LOCATION", "WAREHOUSE 7B", "typing"),
+            ("CODE",     "", "redacted"),
+        ]
+        font = FONT_SM
+        label_w = max(font.size(lbl)[0] for lbl, _v, _s in rows)
+        row_h = 48
+        row_x = x + 20
+        row_w = left_w - 10
+        for i, (lbl, val, kind) in enumerate(rows):
+            ry = ty + i * row_h
+            # Label
+            screen.blit(font.render(lbl, True, GREEN_DIM), (row_x + 10, ry + 10))
+            # Slot box
+            slot_x = row_x + label_w + 24
+            slot_w = row_w - (label_w + 34)
+            slot_h = 32
+            if kind == "unlocked":
+                pygame.draw.rect(screen, (0, 40, 40), (slot_x, ry, slot_w, slot_h))
+                pygame.draw.rect(screen, CYAN, (slot_x, ry, slot_w, slot_h), 1)
+                screen.blit(font.render(val, True, CYAN_BRIGHT),
+                            (slot_x + 8, ry + 6))
+            elif kind == "typing":
+                pygame.draw.rect(screen, (30, 30, 0), (slot_x, ry, slot_w, slot_h))
+                pulse = int(abs(math.sin(time.time() * 3)) * 60) + 160
+                pygame.draw.rect(screen, (pulse, pulse, 0),
+                                 (slot_x, ry, slot_w, slot_h), 2)
+                # Type out characters one by one
+                cps = 6.0  # chars per second
+                period = len(val) / cps + 1.4
+                t = self.trans_timer % period
+                ch_idx = min(len(val), int(t * cps))
+                shown = val[:ch_idx]
+                cur = "_" if int(time.time() * 2) % 2 else " "
+                screen.blit(font.render(shown + cur, True, WHITE),
+                            (slot_x + 8, ry + 6))
+            else:
+                pygame.draw.rect(screen, (0, 40, 0), (slot_x, ry, slot_w, slot_h))
+                pygame.draw.rect(screen, GREEN_DIM, (slot_x, ry, slot_w, slot_h), 1)
+                blocks = font.render("█" * (slot_w // 9),
+                                     True, GREEN_DIM)
+                screen.blit(blocks, (slot_x + 4, ry + 6))
+
+        # Right-column rules
+        text_x = row_x + left_w + 30
+        diff = self.diff
+        bullets = [
+            ("1", "UP / DOWN cycle the multiple-choice options.", GREEN),
+            ("2", "ENTER submits your pick.", GREEN_BRIGHT),
+            ("3", "Unredacted fields auto-confirm — just hit ENTER.", CYAN_BRIGHT),
+            ("4", "Wrong picks burn one of your tries per slot.", RED_BRIGHT),
+        ]
+        self._draw_preview_bullets(text_x, ty, w - (text_x - x) - 20, bullets)
+
+        # Parameter pill
+        pill_y = y + h - 30
+        param = (f"TIME {diff['intel_time']}s   ·   TRIES PER SLOT "
+                 f"{diff.get('intel_attempts', 3)}   ·   {len(DEBRIEF_QUESTIONS)} FIELDS")
+        self._draw_param_pill(x + 20, pill_y, w - 40, param)
 
     # -- RESULT SCREEN (post-minigame, pre-transition) ----------------------
     def _start_result(self, success, text, next_state, label):
@@ -1857,55 +2275,43 @@ class Game:
         # Result content on a separate surface for alpha fade-in
         content = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
 
-        # Which stage just resolved? Derive from result_next.
-        next_to_stage = {"maze": 0, "connect": 1, "intel": 2}
-        completed_stage = next_to_stage.get(self.result_next, -1)
-        unlocked_lines = STAGE_LINES[completed_stage] if completed_stage >= 0 else []
-
         if self.result_success:
             t = time.time()
             pulse = int(abs(math.sin(t * 3)) * 80) + 175
-            pygame.draw.rect(content, (0, pulse, pulse, content_alpha), (10, 10, WIDTH - 20, HEIGHT - 20), 3)
+            pygame.draw.rect(content, (0, pulse, pulse), (10, 10, WIDTH - 20, HEIGHT - 20), 3)
             ts1 = FONT_XL.render("PROTOCOL COMPLETE", True, CYAN_BRIGHT)
-            ts1.set_alpha(content_alpha)
-            content.blit(ts1, ((WIDTH - ts1.get_width()) // 2, 80))
+            content.blit(ts1, ((WIDTH - ts1.get_width()) // 2, 30))
             sub = FONT_MD.render("FILE SECTION DECRYPTED", True, GREEN)
-            sub.set_alpha(content_alpha)
-            content.blit(sub, ((WIDTH - sub.get_width()) // 2, 80 + ts1.get_height() + 6))
-
-            # Show unlocked lines big and clear
-            label = FONT_MD.render("YOU JUST UNREDACTED:", True, GREEN_DIM)
-            label.set_alpha(content_alpha)
-            ly = 220
-            content.blit(label, ((WIDTH - label.get_width()) // 2, ly))
-            ly += label.get_height() + 14
-            for idx in unlocked_lines:
-                line_surf = FONT_MD.render(FILE_REVEALED[idx], True, CYAN_BRIGHT)
-                line_surf.set_alpha(content_alpha)
-                content.blit(line_surf, ((WIDTH - line_surf.get_width()) // 2, ly))
-                ly += line_surf.get_height() + 6
+            content.blit(sub, ((WIDTH - sub.get_width()) // 2, 30 + ts1.get_height() + 6))
+            caption = FONT_SM.render("JUST UNREDACTED — shown in cyan below", True, GREEN_DIM)
         else:
             t = time.time()
             pulse = int(abs(math.sin(t * 5)) * 80) + 175
-            pygame.draw.rect(content, (pulse, 0, 0, content_alpha), (10, 10, WIDTH - 20, HEIGHT - 20), 3)
+            pygame.draw.rect(content, (pulse, 0, 0), (10, 10, WIDTH - 20, HEIGHT - 20), 3)
             ts1 = FONT_XL.render("PROTOCOL FAILED", True, RED_BRIGHT)
-            ts1.set_alpha(content_alpha)
-            content.blit(ts1, ((WIDTH - ts1.get_width()) // 2, 80))
+            content.blit(ts1, ((WIDTH - ts1.get_width()) // 2, 30))
             sub = FONT_MD.render(self.result_text, True, YELLOW)
-            sub.set_alpha(content_alpha)
-            content.blit(sub, ((WIDTH - sub.get_width()) // 2, 80 + ts1.get_height() + 6))
+            content.blit(sub, ((WIDTH - sub.get_width()) // 2, 30 + ts1.get_height() + 6))
+            caption = FONT_SM.render("THESE FIELDS STAY REDACTED", True, RED)
 
-            # Show locked lines that stay redacted
-            label = FONT_MD.render("THIS STAYS REDACTED:", True, RED)
-            label.set_alpha(content_alpha)
-            ly = 220
-            content.blit(label, ((WIDTH - label.get_width()) // 2, ly))
-            ly += label.get_height() + 14
-            for idx in unlocked_lines:
-                line_surf = FONT_MD.render(FILE_REDACTED[idx], True, RED_BRIGHT)
-                line_surf.set_alpha(content_alpha)
-                content.blit(line_surf, ((WIDTH - line_surf.get_width()) // 2, ly))
-                ly += line_surf.get_height() + 6
+        # Shared vertical-file layout — same one used in the briefing & intel phase.
+        # On success, self.stages_done already contains the just-completed stage,
+        # so its fields render as cyan reveals. On failure, that stage is absent,
+        # so its fields stay as redacted bars.
+        cap_y = 30 + ts1.get_height() + 6 + sub.get_height() + 14
+        content.blit(caption, ((WIDTH - caption.get_width()) // 2, cap_y))
+
+        font = FONT_MD
+        label_w = max(font.size(lbl)[0] for lbl, _k, _s in INTEL_FIELDS)
+        list_w = label_w + 40 + 480
+        list_x = (WIDTH - list_w) // 2
+        list_y = cap_y + caption.get_height() + 18
+        draw_vertical_file(content, list_x, list_y, self.stages_done, font=font)
+
+        if content_alpha < 255:
+            mask = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+            mask.fill((255, 255, 255, content_alpha))
+            content.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
 
         screen.blit(content, (0, 0))
 
@@ -1954,49 +2360,42 @@ class Game:
 
     def _draw_transition(self):
         pygame.draw.rect(screen, GREEN, (10, 10, WIDTH-20, HEIGHT-20), 1)
-        title, instr_lines = self._get_transition_instructions()
+        title, _instr_unused = self._get_transition_instructions()
 
-        # Big title
-        draw_text_centered(screen, "NEXT", 60, FONT_MD, GREEN_DIM)
-        draw_text_centered(screen, title, 100, FONT_XL, CYAN_BRIGHT)
+        # Header strip — "INCOMING PROTOCOL" + protocol title in a clear box
+        draw_text_centered(screen, "INCOMING PROTOCOL", 28, FONT_MD, GREEN_DIM)
+        # Pulsing border for the title to draw the eye
+        pulse = int(abs(math.sin(time.time() * 2)) * 60) + 160
+        title_box_w = 760
+        title_box_x = (WIDTH - title_box_w) // 2
+        pygame.draw.rect(screen, (0, pulse, pulse),
+                         (title_box_x, 60, title_box_w, 70), 2)
+        draw_text_centered(screen, title, 70, FONT_XL, CYAN_BRIGHT)
 
-        # Instructions — large, centered
-        y = 200
-        for text, color in instr_lines:
-            if text == "":
-                y += 14
-                continue
-            font = FONT_LG if (color in (GREEN, RED)) else FONT_MD
-            draw_text_centered(screen, text, y, font, color or GREEN)
-            y += font.get_linesize() + 4
-
-        # Maze icon legend — shown on the loading screen INTO the maze
-        # (after roulette is done) so players recognise what they'll see.
-        if self.trans_next == "maze":
-            legend_w = 720
-            legend_x = (WIDTH - legend_w) // 2
-            legend_y = y + 20
-            pygame.draw.rect(screen, GREEN_DIM,
-                             (legend_x - 10, legend_y - 10, legend_w + 20, 240), 1)
-            self._draw_maze_legend(legend_x, legend_y, legend_w)
-        # Connect mini-preview — shown on the loading screen INTO the
-        # connect minigame so players understand the goal at a glance.
+        # Animated preview — same 760×520 frame for every protocol so the
+        # loading screen feels uniform and players know where to look.
+        preview_w = 760
+        preview_h = 520
+        preview_x = (WIDTH - preview_w) // 2
+        preview_y = 150
+        pygame.draw.rect(screen, GREEN_DIM,
+                         (preview_x, preview_y, preview_w, preview_h), 1)
+        if self.trans_next == "roulette":
+            self._draw_roulette_preview(preview_x, preview_y + 14, preview_w, preview_h - 14)
+        elif self.trans_next == "maze":
+            self._draw_maze_preview(preview_x, preview_y + 14, preview_w, preview_h - 14)
         elif self.trans_next == "connect":
-            preview_w = 720
-            preview_x = (WIDTH - preview_w) // 2
-            preview_y = y + 20
-            pygame.draw.rect(screen, GREEN_DIM,
-                             (preview_x - 10, preview_y - 10, preview_w + 20, 240), 1)
-            self._draw_connect_preview(preview_x, preview_y, preview_w, 220)
+            self._draw_connect_preview(preview_x, preview_y + 14, preview_w, preview_h - 14)
+        elif self.trans_next == "intel":
+            self._draw_intel_preview(preview_x, preview_y + 14, preview_w, preview_h - 14)
 
         # Bottom: prompt
         if self.trans_ready:
             if int(time.time() * 2) % 2:
                 draw_text_centered(screen, ">>> PRESS ENTER TO START <<<",
-                                   HEIGHT - 70, FONT_LG, GREEN_BRIGHT)
+                                   HEIGHT - 50, FONT_LG, GREEN_BRIGHT)
         else:
-            # Brief load-in — no progress bar needed, just a hint
-            draw_text_centered(screen, "[ LOADING ]", HEIGHT - 70, FONT_LG, GREEN_DIM)
+            draw_text_centered(screen, "[ LOADING ]", HEIGHT - 50, FONT_LG, GREEN_DIM)
 
     # -- ROULETTE ---------------------------------------------------------
     def _scramble_roulette_digit(self):
@@ -2077,18 +2476,26 @@ class Game:
                                 self.rl_timers = [0.0] * n
 
     def _draw_roulette(self):
-        pygame.draw.rect(screen, GREEN, (10, 5, WIDTH-20, HEIGHT-155), 1)
-        draw_timer_bar(screen, self.remaining_time(), self.game_total)
-
+        # Game-area frame on the right; sidebar (timer + redaction file) on the left.
+        pygame.draw.rect(screen, GREEN,
+                         (GAME_AREA_X, 12, GAME_AREA_W, HEIGHT - 24), 1)
+        draw_sidebar(screen, self.remaining_time(),
+                     self.diff["roulette_time"], self.stages_done, active_stage=0)
 
         n = len(self.rl_target)
         digit_w = 60
         total_w = n * digit_w + (n - 1) * 20
-        start_x = (WIDTH - total_w) // 2
+        center_x = GAME_AREA_X + GAME_AREA_W // 2
+        start_x = center_x - total_w // 2
+
+        # Headline
+        draw_text(screen, "PROTOCOL 1 — ACCESS CODE",
+                  GAME_AREA_X + 16, 24, FONT_SM, GREEN_DIM)
 
         # Target
-        draw_text_centered(screen, "TARGET", 50, FONT_MD, YELLOW)
-        ty = 85
+        ts_label = FONT_MD.render("TARGET", True, YELLOW)
+        screen.blit(ts_label, (center_x - ts_label.get_width() // 2, 70))
+        ty = 110
         for i, d in enumerate(self.rl_target):
             x = start_x + i * (digit_w + 20)
             pygame.draw.rect(screen, DARK_GREEN, (x, ty, digit_w, 70))
@@ -2097,8 +2504,9 @@ class Game:
             screen.blit(ts, (x + (digit_w - ts.get_width())//2, ty + (70 - ts.get_height())//2))
 
         # Current
-        draw_text_centered(screen, "CURRENT", 190, FONT_MD, GREEN)
-        cy = 225
+        cur_label = FONT_MD.render("CURRENT", True, GREEN)
+        screen.blit(cur_label, (center_x - cur_label.get_width() // 2, 220))
+        cy = 260
         for i in range(n):
             x = start_x + i * (digit_w + 20)
             d = self.rl_current[i]
@@ -2129,18 +2537,22 @@ class Game:
 
         # Status
         locked = sum(self.rl_locked)
-        draw_text_centered(screen, f"DIGITS LOCKED: {locked}/{n}", 350, FONT_MD, GREEN)
+        st = FONT_MD.render(f"DIGITS LOCKED: {locked}/{n}", True, GREEN)
+        screen.blit(st, (center_x - st.get_width() // 2, 390))
 
         if self.rl_lock_idx < n:
-            draw_text_centered(screen, f"Locking digit {self.rl_lock_idx+1}... time your lock!", 390, FONT_SM, GREEN_DIM)
+            hint = FONT_SM.render(
+                f"Locking digit {self.rl_lock_idx+1}… time your lock with SPACE",
+                True, GREEN_DIM)
+            screen.blit(hint, (center_x - hint.get_width() // 2, 430))
 
     # -- MAZE -------------------------------------------------------------
     def _init_maze(self):
         tw, th = self.diff["maze_size"]
-        # Use the requested size directly, clamp to screen (leave room for timer+dialogue at bottom)
-        avail_w = WIDTH - 60
-        avail_h = HEIGHT - 190  # top margin + bottom (timer+dialogue)
-        max_w = avail_w // 10   # grid is mw*2+1 cells, each ~10px minimum
+        # Maze lives in the right-hand game area (sidebar holds timer + file).
+        avail_w = GAME_AREA_W - 20
+        avail_h = HEIGHT - 80   # top margin + small bottom margin
+        max_w = avail_w // 10
         max_h = avail_h // 10
         mw = min(tw, max_w)
         mh = min(th, max_h)
@@ -2150,7 +2562,7 @@ class Game:
         self.maze_grid = generate_maze(mw, mh)
         self.maze_gh = len(self.maze_grid)
         self.maze_gw = len(self.maze_grid[0])
-        self.maze_cell_size = min((WIDTH - 60) // self.maze_gw, avail_h // self.maze_gh)
+        self.maze_cell_size = min(avail_w // self.maze_gw, avail_h // self.maze_gh)
         self.maze_cell_size = max(4, min(self.maze_cell_size, 40))  # clamp 4-40
         self.maze_player = [1, 1]
         self.maze_has_key = False
@@ -2359,13 +2771,16 @@ class Game:
             self._maze_move_timer = 0
 
     def _draw_maze(self):
-        pygame.draw.rect(screen, GREEN, (10, 5, WIDTH-20, HEIGHT-155), 1)
-        draw_timer_bar(screen, self.remaining_time(), self.game_total)
-
+        pygame.draw.rect(screen, GREEN,
+                         (GAME_AREA_X, 12, GAME_AREA_W, HEIGHT - 24), 1)
+        draw_sidebar(screen, self.remaining_time(),
+                     self.diff["maze_time"], self.stages_done, active_stage=1)
+        draw_text(screen, "PROTOCOL 2 — MAZE EXTRACTION",
+                  GAME_AREA_X + 16, 16, FONT_SM, GREEN_DIM)
 
         cs = self.maze_cell_size
-        ox = (WIDTH - self.maze_gw * cs) // 2
-        oy = 30
+        ox = GAME_AREA_X + (GAME_AREA_W - self.maze_gw * cs) // 2
+        oy = 40
 
         fog = self.diff["maze_fog"]
         pr, pc = self.maze_player
@@ -2486,14 +2901,17 @@ class Game:
         # Guard alert warning
         if self.maze_guard_alert > 0:
             pulse = int(abs(math.sin(time.time() * 8)) * 55) + 200
-            draw_text_centered(screen, "!! SECURITY ALERT - DETECTED !!", oy - 18, FONT_SM, (pulse, 0, 0))
+            alert = FONT_SM.render("!! SECURITY ALERT - DETECTED !!", True, (pulse, 0, 0))
+            screen.blit(alert,
+                        (GAME_AREA_X + GAME_AREA_W - alert.get_width() - 16, 16))
 
 
     # -- CONNECT ----------------------------------------------------------
     def _init_connect(self):
         num = self.diff["num_nodes"]
-        area_w, area_h = WIDTH - 200, HEIGHT - 280
-        self.cn_area_offset = (100, 40)
+        area_w, area_h = GAME_AREA_W - 60, HEIGHT - 200
+        self.cn_area_offset = (GAME_AREA_X + 30, 60)
+        self.cn_area_size = (area_w, area_h)
 
         # Generate obstacles (rectangular barriers) -- varied sizes
         self.cn_obstacles = []
@@ -2673,7 +3091,7 @@ class Game:
             new_y = self.cn_player[1] + dy * speed
 
             # Clamp to area
-            area_w, area_h = WIDTH - 200, HEIGHT - 280
+            area_w, area_h = self.cn_area_size
             new_x = max(0, min(area_w, new_x))
             new_y = max(0, min(area_h, new_y))
 
@@ -2771,15 +3189,19 @@ class Game:
                                 self._start_result(True, "All nodes linked - file section decrypted", "intel", "INTEL REPORT")
 
     def _draw_connect(self):
-        pygame.draw.rect(screen, GREEN, (10, 5, WIDTH-20, HEIGHT-155), 1)
-        draw_timer_bar(screen, self.remaining_time(), self.game_total)
-
+        pygame.draw.rect(screen, GREEN,
+                         (GAME_AREA_X, 12, GAME_AREA_W, HEIGHT - 24), 1)
+        draw_sidebar(screen, self.remaining_time(),
+                     self.diff["connect_time"], self.stages_done, active_stage=2)
+        draw_text(screen, "PROTOCOL 3 — NODE LINK",
+                  GAME_AREA_X + 16, 16, FONT_SM, GREEN_DIM)
 
         ox, oy = self.cn_area_offset
+        area_w, area_h = self.cn_area_size
 
         # Draw dot grid background
-        for gx in range(0, WIDTH - 200, 30):
-            for gy in range(0, HEIGHT - 280, 30):
+        for gx in range(0, area_w, 30):
+            for gy in range(0, area_h, 30):
                 screen.set_at((ox + gx, oy + gy), GREEN_DIM)
 
         # Draw obstacles
@@ -2860,16 +3282,19 @@ class Game:
         py = int(self.cn_player[1]) + oy
         pygame.draw.circle(screen, WHITE, (px, py), 6)
 
-        # Progress
+        # Progress (centered in the game area)
         status = f"NODES: {len(self.cn_connected)}/{len(self.cn_nodes)}"
         if self.cn_gates:
             activated = sum(1 for g in self.cn_gates if g["activated"])
             status += f"  |  GATES: {activated}/{len(self.cn_gates)}"
-        draw_text_centered(screen, status, HEIGHT - 160, FONT_MD, GREEN)
+        s_surf = FONT_MD.render(status, True, GREEN)
+        cx = GAME_AREA_X + GAME_AREA_W // 2
+        screen.blit(s_surf, (cx - s_surf.get_width() // 2, HEIGHT - 80))
 
         # Warning
         if self.cn_warning_timer > 0:
-            draw_text_centered(screen, self.cn_warning, HEIGHT - 180, FONT_SM, RED_BRIGHT)
+            w_surf = FONT_SM.render(self.cn_warning, True, RED_BRIGHT)
+            screen.blit(w_surf, (cx - w_surf.get_width() // 2, HEIGHT - 110))
 
     # -- INTEL (confirm if unlocked, multiple choice if locked) -----------
     def _init_intel(self, restore=False):
